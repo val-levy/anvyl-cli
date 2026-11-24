@@ -56,7 +56,7 @@ def test_get_returns_none_when_nothing(kr, tmp_path):
     assert auth.get_api_key(tmp_path) is None
 
 
-def test_delete_removes_both(kr, tmp_path, monkeypatch):
+def test_delete_removes_both(kr, tmp_path):
     kr[("anvyl", "openrouter")] = "a"
     (tmp_path / "key").write_text("b")
     auth.delete_api_key(tmp_path)
@@ -69,3 +69,45 @@ def test_get_uses_resolved_data_dir_when_none(kr, tmp_path, monkeypatch):
     monkeypatch.setenv("ANVYL_HOME", str(tmp_path))
     (tmp_path / "key").write_text("filekey\n")
     assert auth.get_api_key() == "filekey"
+
+
+def _raising(monkeypatch, exc):
+    def boom(*a, **k):
+        raise exc
+
+    for name in ("get_password", "set_password", "delete_password"):
+        monkeypatch.setattr(keyring, name, boom)
+
+
+def test_broad_keyring_exceptions_do_not_crash(kr, tmp_path, monkeypatch):
+    _raising(monkeypatch, RuntimeError("dbus exploded"))
+    assert auth.get_api_key(tmp_path) is None
+    assert auth.store_api_key("k3", tmp_path) == "file"
+    assert auth.get_api_key(tmp_path) == "k3"
+    auth.delete_api_key(tmp_path)
+    assert not (tmp_path / "key").exists()
+
+
+def test_store_strips_and_rejects_empty(kr, tmp_path):
+    auth.store_api_key("  k4\n", tmp_path)
+    assert kr[("anvyl", "openrouter")] == "k4"
+    with pytest.raises(ValueError):
+        auth.store_api_key("   ", tmp_path)
+
+
+def test_keychain_store_removes_stale_file(kr, tmp_path):
+    (tmp_path / "key").write_text("old")
+    assert auth.store_api_key("new", tmp_path) == "keychain"
+    assert not (tmp_path / "key").exists()
+
+
+def test_file_store_removes_stale_keychain_entry(kr, tmp_path, monkeypatch):
+    kr[("anvyl", "openrouter")] = "old"
+
+    def boom(*a, **k):
+        raise keyring.errors.KeyringError("read-only")
+
+    monkeypatch.setattr(keyring, "set_password", boom)
+    assert auth.store_api_key("new", tmp_path) == "file"
+    assert not kr
+    assert auth.get_api_key(tmp_path) == "new"

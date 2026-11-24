@@ -19,27 +19,30 @@ terminal the human types them.
 from __future__ import annotations
 
 import argparse
+import getpass
 import shutil
 import sys
 import time
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.errors import GraphInterrupt
-from langgraph.types import Command
 from rich.console import Console
 from rich.panel import Panel
 
-from . import tasks
+from . import auth, tasks
 from .coach import Coach
-from .graph import LOOP_STEPS, build_graph, pending_interrupt
+from .driver import drive
+from .graph import LOOP_STEPS, build_graph
 from .registry import PluginRegistry, SkillRegistry
+from .session import preview, run_session
 from .state import HarnessState, initial_state
 from .storage import (
     checkpoints_path,
     ensure_data_dir,
+    reset_data,
     resolve_data_dir,
     save_session,
     sessions_dir,
@@ -355,40 +358,16 @@ class Runner:
             else:
                 self.render_ministrip(initial)
 
-            pending = None
-            if resume:
-                payload = pending_interrupt(self.graph, self.config)
-                if payload is not None:
-                    pending = Command(resume=self.provider.answer(payload, self))
-            result = None
-            while True:
-                try:
-                    result = self.graph.invoke(
-                        pending if pending is not None else initial, self.config
-                    )
-                except GraphInterrupt as exc:
-                    # Older LangGraph raises on interrupt; 1.x returns instead.
-                    interrupts = getattr(exc, "interrupts", [])
-                    payload = interrupts[0].value if interrupts else None
-                    if payload is None:
-                        payload = pending_interrupt(self.graph, self.config)
-                    if payload is None:
-                        raise
-                    try:
-                        self._state_view = self.graph.get_state(self.config).values
-                    except Exception:
-                        pass
-                    pending = Command(resume=self.provider.answer(payload, self))
-                    continue
-                pending = None
-                payload = pending_interrupt(self.graph, self.config)
-                if payload is None:
-                    break
-                try:
-                    self._state_view = self.graph.get_state(self.config).values
-                except Exception:
-                    pass
-                pending = Command(resume=self.provider.answer(payload, self))
+            def on_state(values: Mapping[str, Any]) -> None:
+                self._state_view = dict(values)
+
+            result = drive(
+                self.graph,
+                initial,
+                self.config,
+                lambda payload: self.provider.answer(payload, self),
+                on_state,
+            )
             self._state_view = result
             save_session(result, sessions_dir(self.data_dir))
             if result.get("gate_blocked") and not result.get("gate_passed"):
@@ -401,57 +380,94 @@ class Runner:
             return result
 
 
+SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset")
+# The old top-level tutorial flags stay accepted (hidden) and mean `anvyl tutorial ...`.
+LEGACY_FLAGS = {
+    "--task",
+    "--mode",
+    "--level",
+    "--goal",
+    "--demo",
+    "--interactive",
+    "--live",
+    "--high-stakes",
+    "--session",
+    "--list-tasks",
+    "--no-rail",
+}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="anvyl", description="Human-most-of-the-loop coding coach")
-    p.add_argument(
+    sub = p.add_subparsers(dest="cmd")
+
+    def add(name: str, help: str) -> argparse.ArgumentParser:
+        sp = sub.add_parser(name, help=help, description=help)
+        sp.add_argument(
+            "--data-dir",
+            default=None,
+            help="data dir for sessions/checkpoints/config (default: $ANVYL_HOME or ~/.anvyl)",
+        )
+        return sp
+
+    add("session", "coach you on a real ticket in the current folder (default)")
+    add("login", "store your OpenRouter API key")
+    add("logout", "remove the stored API key")
+    add("reset", "delete all anvyl data")
+    add("preview", "show what would be sent to the model for a ticket (no network)").add_argument(
+        "ticket", nargs="+"
+    )
+    t = add("tutorial", "run the built-in tutorial tasks")
+    t.add_argument(
         "--task",
         default=tasks.DEFAULT_TASK,
         choices=sorted(tasks.TASKS),
         help="task to run (default: toy-backoff)",
     )
-    p.add_argument("--mode", default="learn", choices=["ship", "learn"])
-    p.add_argument("--level", type=int, default=1, choices=range(0, 5))
-    p.add_argument(
+    t.add_argument("--mode", default="learn", choices=["ship", "learn"])
+    t.add_argument("--level", type=int, default=1, choices=range(0, 5))
+    t.add_argument(
         "--goal", default=None, help="goal in your own words (else prompted / task default)"
     )
-    p.add_argument(
+    t.add_argument(
         "--demo",
         action="store_true",
         help="scripted demo run (also the default when stdin is not a tty)",
     )
-    p.add_argument(
+    t.add_argument(
         "--interactive", action="store_true", help="force interactive prompts even without a tty"
     )
-    p.add_argument(
+    t.add_argument(
         "--live",
         action="store_true",
         help="use the live Claude coach via OpenRouter (default: offline/demo coach)",
     )
-    p.add_argument(
+    t.add_argument(
         "--high-stakes",
         action="store_true",
         help="high-stakes change: explain-back required even in Ship mode",
     )
-    p.add_argument(
+    t.add_argument(
         "--session", default=None, help="session id to resume (re-answers the pending interrupt)"
     )
-    p.add_argument("--list-tasks", action="store_true", help="list tasks and exit")
-    p.add_argument(
+    t.add_argument("--list-tasks", action="store_true", help="list tasks and exit")
+    t.add_argument(
         "--no-rail", action="store_true", help="start with the observability rail hidden"
-    )
-    p.add_argument(
-        "--data-dir",
-        default=None,
-        help=(
-            "data dir for sessions/checkpoints/skills/plugins (default: $ANVYL_HOME or ~/.anvyl)"
-        ),
     )
     return p
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    console = Console()
+def _route(argv: list[str]) -> list[str]:
+    """No subcommand means `session`; legacy tutorial flags mean `tutorial`."""
+    if argv and (argv[0] in SUBCOMMANDS or argv[0] in ("-h", "--help")):
+        return argv
+    if argv and not argv[0].startswith("-"):
+        return argv  # let argparse report the bad subcommand
+    legacy = any(a.split("=", 1)[0] in LEGACY_FLAGS for a in argv)
+    return ["tutorial" if legacy else "session", *argv]
+
+
+def run_tutorial(args: argparse.Namespace, console: Console) -> int:
     if args.list_tasks:
         for task_id, task in sorted(tasks.TASKS.items()):
             mark = " (default)" if task_id == tasks.DEFAULT_TASK else ""
@@ -486,6 +502,60 @@ def main(argv: list[str] | None = None) -> int:
     )
     runner.run(initial, resume=bool(args.session))
     return 0
+
+
+def run_login(data_dir: Path) -> int:
+    try:
+        key = getpass.getpass("OpenRouter API key (input hidden): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        key = ""
+    if not key:
+        print("error: no key entered", file=sys.stderr)
+        return 1
+    where = auth.store_api_key(key, data_dir)
+    print(
+        "key stored in the OS keychain"
+        if where == "keychain"
+        else f"key stored in {data_dir / 'key'} (owner-only file)"
+    )
+    return 0
+
+
+def run_reset(data_dir: Path) -> int:
+    try:
+        answer = input("type yes to delete all anvyl data: ")
+    except EOFError:
+        answer = ""
+    if answer != "yes":
+        print("aborted: nothing deleted", file=sys.stderr)
+        return 1
+    try:
+        reset_data(data_dir)
+    except (ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"deleted the contents of {data_dir} (a key in the OS keychain stays: anvyl logout)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(_route(list(sys.argv[1:] if argv is None else argv)))
+    console = Console()
+    if args.cmd == "tutorial":
+        return run_tutorial(args, console)
+    data_dir = resolve_data_dir(args.data_dir).absolute()
+    if args.cmd == "login":
+        return run_login(data_dir)
+    if args.cmd == "logout":
+        auth.delete_api_key(data_dir)
+        print("key removed (OS keychain and key file)")
+        return 0
+    if args.cmd == "reset":
+        return run_reset(data_dir)
+    if args.cmd == "preview":
+        preview(Path.cwd(), data_dir, console, " ".join(args.ticket))
+        return 0
+    return run_session(Path.cwd(), data_dir, console, None)
 
 
 if __name__ == "__main__":

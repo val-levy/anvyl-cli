@@ -66,6 +66,9 @@ class FolderConfig:
     def consented(self, folder: Path) -> bool:
         return self._entry(folder).get("consent") is True
 
+    def consent_asked(self, folder: Path) -> bool:
+        return isinstance(self._entry(folder).get("consent"), bool)
+
     def set_consent(self, folder: Path, yes: bool) -> None:
         self._update(folder, consent=yes)
 

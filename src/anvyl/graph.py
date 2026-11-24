@@ -365,7 +365,12 @@ def build_real_graph(
         return Command(goto=node, update=fault_update(node))
 
     def diff_text() -> str:
-        return changes_mod.compute_changes(root, profile, work_dir).text
+        c = changes_mod.compute_changes(root, profile, work_dir)
+        if coach.can_read_files:
+            return c.text
+        # Ticket-and-plan-only: the model gets the user's added lines, never untouched
+        # context, removed lines or file names from the project.
+        return "\n".join(f"+{ln}" for ln in c.added_lines)
 
     # -- nodes -----------------------------------------------------------
     def ticket_node(state: HarnessState) -> Command:

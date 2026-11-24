@@ -156,6 +156,14 @@ def test_state_and_checkpoint_never_contain_file_contents(tmp_path):
     assert secret.encode() not in run.db
 
 
+def test_without_file_consent_the_grader_sees_only_added_lines(tmp_path):
+    client = FakeClient([GATE_OK, COACH, QS, GOOD])
+    run_real(tmp_path, client, answers(work=edit("y = 2\n")))
+    sent = json.dumps(client.calls[2:])  # explain-back questions and grading
+    assert "y = 2" in sent
+    assert "x = 1" not in sent and "app.py" not in sent, "untouched content/file names stay local"
+
+
 def test_keep_diffs_writes_diff_only_when_enabled(tmp_path):
     for keep in (True, False):
         client = FakeClient([GATE_OK, COACH, QS, GOOD])
@@ -185,6 +193,8 @@ def test_snippet_text_not_in_state_or_checkpoints_except_interrupt_payload(tmp_p
     assert marker not in json.dumps(run.state, default=str)
     assert marker not in (run.sessions / "real-test.json").read_text()
     con = sqlite3.connect(tmp_path / "checkpoints.sqlite")
+    # Graph level only: the graph alone still writes the shown text into `writes`. The session
+    # (tests/test_session.py) deletes the thread, uses secure_delete and so leaves no copy on disk.
     # Checkpointed state never has it. LangGraph also stores the interrupt payload shown to
     # the user (the coach text at L2) in `writes`; that is the only place it may appear.
     assert not [

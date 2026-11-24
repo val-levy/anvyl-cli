@@ -1,0 +1,415 @@
+"""Persistent real-project session: one prompt, many tickets.
+
+Trust boundary: slash commands are parsed only from what the human types at a
+prompt (`Session.ask`). Model text, ticket text and file contents are only ever
+printed, never parsed. Level, profile, consent and keepdiffs change only through
+those commands and the consent prompt, and every setting is enforced in code.
+All output goes through `Session.say`: control/ANSI stripped, Rich markup, emoji
+codes and highlighting off.
+
+Checkpoint privacy: LangGraph persists interrupt payloads (coach text, snippets)
+in checkpoints.sqlite. The connection uses secure_delete, each ticket's thread is
+deleted when it ends however it ends (finished, abandoned, quit, EOF, Ctrl-C, error),
+and threads a killed process left behind are purged at startup once their marker
+file under <data>/threads/ is 7 days old.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import sqlite3
+import time
+import uuid
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+from rich.console import Console
+
+from . import guard
+from .auth import get_api_key
+from .changes import clear_snapshot
+from .driver import drive
+from .grader import _clean
+from .graph import LOOP_STEPS, build_real_graph
+from .llm import ModelClient, ModelError, OpenRouterClient
+from .policy import REAL_MAX_LEVEL, clamp_real_level
+from .profile import FolderConfig, Profile, effective_profile
+from .real_coach import RealCoach
+from .state import initial_real_state
+from .storage import (
+    checkpoints_path,
+    cleanup_stale_work,
+    ensure_data_dir,
+    sessions_dir,
+    work_dir_for,
+)
+
+LOGIN_HINT = 'not logged in: run "anvyl login"'
+TICKET_ONLY = "[!] ticket-and-plan-only coaching: the model will not see your files"
+RAIL_MIN_WIDTH = 110
+STALE_DAYS = 7
+HELP = (
+    "/mode ship|learn  /level 0-2  /profile professional|personal  /keepdiffs on|off\n"
+    "/status  /score  /graph  /rail  /help  /quit\n"
+    "at a work prompt: /done when finished, /hint for the coach"
+)
+PERSONAL_NOTICE = (
+    "notice (personal profile): the model may read non-secret files in this folder. "
+    "With /keepdiffs on, diffs of your changes are kept in your anvyl data dir. "
+    "Shown once."
+)
+
+
+class _Quit(Exception):
+    pass
+
+
+def _input(prompt: str) -> str | None:
+    try:
+        return input(prompt)
+    except EOFError:
+        return None
+
+
+@contextmanager
+def open_checkpointer(data_dir: Path) -> Iterator[SqliteSaver]:
+    """Checkpointer whose connection overwrites deleted rows instead of leaving them on disk."""
+    conn = sqlite3.connect(str(checkpoints_path(data_dir)), check_same_thread=False)
+    try:
+        conn.execute("PRAGMA secure_delete=ON")
+        yield SqliteSaver(conn)
+    finally:
+        conn.close()
+
+
+def _forget_thread(saver: SqliteSaver, data_dir: Path, thread_id: str) -> None:
+    """Delete a thread's checkpoints and marker, and fold the WAL so no old copy lingers."""
+    with contextlib.suppress(Exception):
+        saver.delete_thread(thread_id)
+    (data_dir / "threads" / thread_id).unlink(missing_ok=True)
+    with contextlib.suppress(Exception):
+        saver.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def _purge_stale_threads(saver: SqliteSaver, data_dir: Path) -> None:
+    # ponytail: marker mtime = ticket start; a ticket open for 7+ days would be purged.
+    cutoff = time.time() - STALE_DAYS * 86400
+    marks = data_dir / "threads"
+    try:
+        children = list(marks.iterdir())
+    except OSError:
+        return
+    for mark in children:
+        try:
+            if mark.is_file() and not mark.is_symlink() and mark.stat().st_mtime < cutoff:
+                _forget_thread(saver, data_dir, mark.name)
+        except OSError:
+            continue
+
+
+class _NoClient:
+    def chat(self, *args: Any, **kwargs: Any) -> Any:
+        raise ModelError("preview makes no model calls")
+
+
+def _access(cfg: FolderConfig, root: Path) -> tuple[Profile, bool]:
+    """Stored profile and whether the model may read files (no stored consent means no)."""
+    profile = effective_profile(cfg, root)
+    return profile, profile is Profile.PERSONAL or cfg.consented(root)
+
+
+class Session:
+    def __init__(
+        self,
+        root: Path,
+        data_dir: Path,
+        console: Console,
+        client: ModelClient | None,
+        read_line: Callable[[str], str | None],
+    ):
+        self.root = root.resolve()
+        self.data_dir = data_dir
+        self.console = console
+        self.client = client
+        self.read_line = read_line
+        self.cfg = FolderConfig(data_dir)
+        self.mode = "learn"
+        self.level = 1
+        self.rail = True
+        self.profile = Profile.PROFESSIONAL
+        self.can_read = False
+        self.view: Mapping[str, Any] = {}
+        self.score_lines: list[str] = []
+        self.saver: SqliteSaver | None = None
+
+    # -- io --------------------------------------------------------------------
+    def say(self, text: object) -> None:
+        self.console.print(
+            _clean(str(text), 4000), markup=False, highlight=False, emoji=False, soft_wrap=True
+        )
+
+    def ask(self, prompt: str, graph_prompt: bool = False) -> str:
+        """One line from the human. EOF or /quit ends the session; other /commands run here."""
+        while True:
+            line = self.read_line(prompt)
+            if line is None:
+                raise _Quit
+            line = line.strip()
+            if not line.startswith("/"):
+                return line
+            if graph_prompt and line.lower() in ("/done", "/hint"):
+                return line.lower()
+            self.command(line)
+
+    # -- folder setup ----------------------------------------------------------
+    def setup_folder(self) -> None:
+        profile = self.cfg.profile(self.root)
+        if profile is None:
+            self.say(
+                f"First time in {self.root}. Is this a work project (professional, the default) "
+                "or a personal one?"
+            )
+            while profile is None:
+                choice = self.ask("[professional/personal] ").lower()
+                profile = (
+                    Profile.PERSONAL
+                    if choice == "personal"
+                    else Profile.PROFESSIONAL
+                    if choice in ("", "professional")
+                    else None
+                )
+        self.use_profile(profile)
+
+    def use_profile(self, profile: Profile) -> None:
+        self.cfg.set_profile(self.root, profile)
+        self.profile = profile
+        if profile is Profile.PERSONAL:
+            self.can_read = True
+            if not self.cfg.personal_notice_seen():
+                self.say(PERSONAL_NOTICE)
+                self.cfg.mark_personal_notice_seen()
+            return
+        if not self.cfg.consent_asked(self.root):
+            self.say(
+                f"Let the model read files in {self.root}? Secrets are redacted and denied "
+                "files are never sent. Default is no."
+            )
+            self.cfg.set_consent(self.root, self.ask("[y/N] ").lower() in ("y", "yes"))
+        self.can_read = self.cfg.consented(self.root)
+        if not self.can_read:
+            self.say(TICKET_ONLY)
+
+    # -- slash commands (human-typed only) -------------------------------------
+    def command(self, line: str) -> None:
+        cmd, *args = line.split()
+        cmd, arg = cmd.lower(), (args[0].lower() if args else "")
+        if cmd == "/quit":
+            raise _Quit
+        if cmd == "/help":
+            self.say(HELP)
+        elif cmd == "/status":
+            self.status()
+        elif cmd == "/score":
+            self.say("\n".join(self.score_lines) or "no scorecard yet")
+        elif cmd == "/graph":
+            self.say(" -> ".join(LOOP_STEPS) + f"   (now: {self.view.get('current_node', '-')})")
+        elif cmd == "/rail":
+            self.rail = not self.rail
+            self.say(f"rail {'on' if self.rail else 'off'}")
+        elif cmd == "/mode":
+            if arg in ("ship", "learn"):
+                self.mode = arg
+                self.say(f"mode -> {arg} (applies from the next ticket)")
+            else:
+                self.say("usage: /mode ship|learn")
+        elif cmd == "/level":
+            if not (arg.isascii() and arg.isdigit()):
+                self.say(f"usage: /level 0-{REAL_MAX_LEVEL}")
+            elif int(arg) > REAL_MAX_LEVEL:
+                self.say(
+                    f"level {int(arg)} is not available on real projects (max L{REAL_MAX_LEVEL})"
+                )
+            else:
+                self.level = clamp_real_level(int(arg))
+                self.say(f"level -> L{self.level} (applies from the next ticket)")
+        elif cmd == "/profile":
+            if arg in ("professional", "personal"):
+                self.use_profile(Profile(arg))
+                self.say(f"profile -> {arg}")
+            else:
+                self.say("usage: /profile professional|personal")
+        elif cmd == "/keepdiffs":
+            if self.profile is not Profile.PERSONAL:
+                self.say("keepdiffs is only available with the personal profile")
+            elif arg in ("on", "off"):
+                self.cfg.set_keep_diffs(self.root, arg == "on")
+                self.say(f"keepdiffs -> {arg}")
+            else:
+                self.say("usage: /keepdiffs on|off")
+        elif cmd in ("/done", "/hint"):
+            self.say(f"{cmd} is only valid at a work prompt")
+        else:
+            self.say(f"unknown command {cmd} (try /help)")
+
+    # -- rendering -------------------------------------------------------------
+    def stats(self) -> tuple[int, int]:
+        return len(self.view.get("files_read") or []), int(self.view.get("tokens", 0))
+
+    def status(self) -> None:
+        files, tokens = self.stats()
+        v = self.view
+        level = v.get("level", self.level)
+        gate = "passed" if v.get("gate_passed") else "locked"
+        if self.rail and self.console.width >= RAIL_MIN_WIDTH:
+            self.say(
+                f"| step       {v.get('current_node', '-')}\n"
+                f"| level      L{level}  mode {v.get('mode', self.mode)}\n"
+                f"| profile    {self.profile.value}\n"
+                f"| gate       {gate}\n"
+                f"| files sent {files}\n"
+                f"| tokens     {tokens}"
+            )
+        else:
+            self.say(
+                f"step {v.get('current_node', '-')} | L{level} | mode {v.get('mode', self.mode)} | "
+                f"{self.profile.value} | gate {gate} | files sent {files} | tokens {tokens}"
+            )
+
+    def scorecard(self, st: Mapping[str, Any]) -> list[str]:
+        h, a = int(st.get("human_lines", 0)), int(st.get("ai_lines", 0))
+        you = h / (h + a) * 100 if h + a else 100.0
+        ch = st.get("changes") or {}
+        files, tokens = self.stats()
+        lines = ["scorecard"]
+        if st.get("abandoned"):
+            lines.append("  abandoned: no changes found")
+        lines += [
+            f"  authorship  you {you:.0f}% ({h} lines) / AI {100 - you:.0f}% ({a} lines)",
+            f"  changes     {ch.get('files', 0)} files, "
+            f"+{ch.get('added', 0)} -{ch.get('removed', 0)}",
+        ]
+        if st.get("questions"):
+            lines.append(f"  explain     {float(st.get('explain_score', 0)):.0%}")
+            lines.append(f"  ownership   {float(st.get('ownership_score', 0)):.0%}")
+        lines += [
+            f"  level       L{st.get('level', self.level)}",
+            f"  profile     {self.profile.value}",
+            f"  files sent  {files}",
+            f"  tokens      {tokens}",
+        ]
+        return lines
+
+    # -- one ticket --------------------------------------------------------------
+    def answer(self, payload: dict) -> str:
+        kind = payload.get("kind")
+        if kind == "coach_next":
+            self.say("coach: " + str(payload.get("text", "")))
+        elif kind == "error":
+            self.say(payload.get("message", ""))
+        self.say(payload.get("prompt", ""))
+        return self.ask("> ", graph_prompt=True)
+
+    def run_ticket(self, ticket: str) -> None:
+        assert self.saver is not None and self.client is not None
+        sid = f"r-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        work = work_dir_for(self.data_dir, sid)
+        marks = self.data_dir / "threads"
+        marks.mkdir(parents=True, exist_ok=True)
+        (marks / sid).touch()
+        try:
+            coach = RealCoach(self.client, self.root, self.profile, self.can_read)
+            graph = build_real_graph(
+                coach,
+                self.client,
+                self.root,
+                self.profile,
+                sessions_dir(self.data_dir),
+                work,
+                self.saver,
+                self.cfg.keep_diffs(self.root),
+            )
+            state0 = initial_real_state(
+                sid, ticket, str(self.root), self.profile.value, self.mode, self.level, False,
+                str(work),
+            )  # fmt: skip
+            self.view = state0
+            self.status()
+            config = {"configurable": {"thread_id": sid}}
+            drive(graph, state0, config, self.answer, self.on_state)
+            self.finish(graph.get_state(config).values)
+        except (_Quit, KeyboardInterrupt):
+            raise
+        except Exception as exc:  # type name only: messages can echo ticket or file text
+            self.say(f"error: the ticket failed ({type(exc).__name__}); nothing was scored")
+        finally:
+            self.view = {}
+            clear_snapshot(work)
+            _forget_thread(self.saver, self.data_dir, sid)
+
+    def on_state(self, values: Mapping[str, Any]) -> None:
+        self.view = dict(values)
+
+    def finish(self, st: Mapping[str, Any]) -> None:
+        self.view = st
+        if st.get("quit"):
+            self.say("session ended: nothing scored")
+        elif st.get("gate_blocked") and not st.get("gate_passed"):
+            self.say("[locked] attempt gate blocked: no usable human attempt. Nothing was scored.")
+        else:
+            self.score_lines = self.scorecard(st)
+            self.say("\n".join(self.score_lines))
+            if st.get("current_node") == "scorecard":
+                self.level = clamp_real_level(int(st.get("level", self.level)))
+
+
+def run_session(
+    root: Path,
+    data_dir: Path,
+    console: Console,
+    client: ModelClient | None,
+    read_line: Callable[[str], str | None] = _input,
+) -> int:
+    data_dir = ensure_data_dir(data_dir)
+    cleanup_stale_work(data_dir)
+    s = Session(root, data_dir, console, client, read_line)
+    if client is None:
+        key = get_api_key(data_dir)
+        if not key:
+            s.say(LOGIN_HINT)
+            return 1
+        s.client = OpenRouterClient(key)
+    try:
+        with open_checkpointer(data_dir) as saver:
+            s.saver = saver
+            _purge_stale_threads(saver, data_dir)
+            s.say(f"anvyl  |  {s.root.name}  |  /help for commands")
+            s.setup_folder()
+            while True:
+                if ticket := s.ask("ticket> "):
+                    s.run_ticket(ticket)
+    except _Quit:
+        return 0
+    except KeyboardInterrupt:
+        s.say("interrupted")
+        return 130
+
+
+def preview(
+    root: Path,
+    data_dir: Path,
+    console: Console,
+    ticket: str,
+    client: ModelClient | None = None,
+) -> None:
+    """Print the exact messages a first model call would carry. Never touches the network."""
+    root = root.resolve()
+    profile, can_read = _access(FolderConfig(data_dir), root)
+    coach = RealCoach(client or _NoClient(), root, profile, can_read)
+    s = Session(root, data_dir, console, None, _input)
+    for m in coach.build_messages({"ticket": ticket, "level": 1}):
+        s.say(f"--- {m['role']} ---\n{m['content']}")
+    n = len(guard.list_files(root, profile)) if can_read else 0
+    s.say(f"--- file tools: {'on' if can_read else 'off'} ({n} readable files) ---")
