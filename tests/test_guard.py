@@ -445,3 +445,13 @@ def test_redact_unknown_and_text_files_get_config_rule(path, text, secret):
 def test_redact_code_extensions_keep_code(path, line):
     text = line + "\n"
     assert redact(text, path) == (text, 0)
+
+
+@pytest.mark.parametrize("path", [".env.py", "prod.env.js", ".env.local.ts", "credentials"])
+def test_redact_config_names_win_over_code_suffix(path: str) -> None:
+    out, n = redact("db_password = hunter2xyz\n", path)
+    assert "hunter2xyz" not in out and n == 1
+
+
+def test_redact_real_source_file_still_gets_source_treatment() -> None:
+    assert redact("password = compute()\n", "app.py")[1] == 0

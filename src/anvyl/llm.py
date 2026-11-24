@@ -69,14 +69,16 @@ class OpenRouterClient:
             with opener.open(request, timeout=self.timeout) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
             message = result["choices"][0]["message"]
-            calls = [
-                ToolCall(
-                    id=c.get("id", ""),
-                    name=c["function"]["name"],
-                    arguments=json.loads(c["function"].get("arguments") or "{}"),
+            calls = []
+            for c in message.get("tool_calls") or []:
+                args = json.loads(c["function"].get("arguments") or "{}")
+                calls.append(
+                    ToolCall(
+                        id=c.get("id", ""),
+                        name=c["function"]["name"],
+                        arguments=args if isinstance(args, dict) else {},
+                    )
                 )
-                for c in message.get("tool_calls") or []
-            ]
             return ChatResult(
                 text=(message.get("content") or "").strip(),
                 tool_calls=calls,

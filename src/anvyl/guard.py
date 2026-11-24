@@ -205,10 +205,18 @@ _CODE_EXTS = set(
 )
 
 
+_CONFIG_NAMES = {"credentials", ".npmrc", ".netrc", ".pgpass", "config"}
+
+
 def _is_config(path: str | None) -> bool:
     if path is None:
         return True
-    return PurePosixPath(path.replace("\\", "/")).suffix.lower() not in _CODE_EXTS
+    pure = PurePosixPath(path.replace("\\", "/"))
+    name = pure.name.lower()
+    # Name-based config wins over a code suffix (`.env.py`, `prod.env.js`).
+    if name.startswith(".env") or ".env." in name or name in _CONFIG_NAMES:
+        return True
+    return pure.suffix.lower() not in _CODE_EXTS
 
 
 def _sub(m: re.Match[str]) -> str:
