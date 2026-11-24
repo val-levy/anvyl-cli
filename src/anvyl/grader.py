@@ -18,6 +18,9 @@ SYSTEM = (
     "Reply with a single JSON object and nothing else."
 )
 MIN_WORDS = 3
+# CSI / OSC sequences (whole), then any leftover C0/C1 controls except \n and \t.
+_ESC_SEQ = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _WRAPPER = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 
@@ -26,6 +29,12 @@ class Grade:
     score: float
     correct: list[bool]
     feedback: list[str]
+
+
+def _clean(text: str, cap: int = 500) -> str:
+    """Strip terminal escapes/control chars from model text and cap its length."""
+    text = _CONTROL.sub("", _ESC_SEQ.sub("", text))
+    return text if len(text) <= cap else text[: cap - 1] + "\u2026"
 
 
 def _ask(client: ModelClient, user: str) -> dict:
@@ -61,7 +70,7 @@ def check_attempt(client: ModelClient, ticket: str, attempt: str) -> tuple[bool,
     genuine, reason = data.get("genuine"), data.get("reason")
     if not isinstance(genuine, bool) or not isinstance(reason, str):
         raise ModelError("model reply had the wrong shape")
-    return genuine, reason
+    return genuine, _clean(reason)
 
 
 def generate_questions(client: ModelClient, ticket: str, changes_text: str) -> list[str]:
@@ -81,7 +90,7 @@ def generate_questions(client: ModelClient, ticket: str, changes_text: str) -> l
         or not all(isinstance(q, str) and q.strip() for q in qs)
     ):
         raise ModelError("model did not return exactly 3 questions")
-    return qs
+    return [_clean(q, 300) for q in qs]
 
 
 def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, str]]) -> Grade:
@@ -91,7 +100,11 @@ def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, st
     feedback = ["No real answer given."] * len(qa)
     sent = [i for i, (_, a) in enumerate(qa) if len(a.split()) >= MIN_WORDS]
     if sent:
-        pairs = "\n".join(f"Q{n}: {qa[i][0]}\nA{n}: {qa[i][1]}" for n, i in enumerate(sent, 1))
+        # One fence per answer: an answer cannot forge another entry.
+        pairs = "\n".join(
+            f"Question {n}: {qa[i][0]}\n" + fence(f"answer_{n}", qa[i][1])
+            for n, i in enumerate(sent, 1)
+        )
         data = _ask(
             client,
             "Grade each answer about this change as correct or not, with one sentence of "
@@ -99,7 +112,8 @@ def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, st
             f"exactly {len(sent)} entries, in order.\n"
             + fence("changes", changes_text)
             + "\n"
-            + fence("answers", pairs),
+            + "\n"
+            + pairs,
         )
         res = data.get("results")
         if not isinstance(res, list) or len(res) != len(sent):
@@ -111,5 +125,5 @@ def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, st
                 or not isinstance(r.get("feedback"), str)
             ):
                 raise ModelError("model result had the wrong shape")
-            correct[i], feedback[i] = r["correct"], r["feedback"]
+            correct[i], feedback[i] = r["correct"], _clean(r["feedback"])
     return Grade(sum(correct) / len(qa), correct, feedback)
