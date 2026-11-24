@@ -365,11 +365,10 @@ def build_real_graph(
         return Command(goto=node, update=fault_update(node))
 
     def diff_text() -> str:
-        c = changes_mod.compute_changes(root, profile, work_dir)
-        if coach.can_read_files:
-            return c.text
         # Ticket-and-plan-only: nothing from the diff (added lines can carry old text).
-        return ""
+        if not coach.can_read_files:
+            return ""
+        return changes_mod.compute_changes(root, profile, work_dir).text
 
     # -- nodes -----------------------------------------------------------
     def ticket_node(state: HarnessState) -> Command:
@@ -550,7 +549,13 @@ def build_real_graph(
             "high_stakes": state.get("high_stakes") or policy.high_stakes("", c.files),
         }
         return Command(
-            goto="explain_questions" if policy.explainback_required(merged) else "scorecard",
+            # No file consent: the grader would have nothing to grade against, so skip
+            # explain-back (the scorecard already handles a run without questions).
+            goto=(
+                "explain_questions"
+                if coach.can_read_files and policy.explainback_required(merged)
+                else "scorecard"
+            ),
             update={
                 **update,
                 "high_stakes": bool(merged["high_stakes"]),

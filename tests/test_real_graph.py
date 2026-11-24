@@ -157,11 +157,16 @@ def test_state_and_checkpoint_never_contain_file_contents(tmp_path):
 
 
 def test_without_file_consent_no_diff_content_reaches_the_model(tmp_path):
-    client = FakeClient([GATE_OK, COACH, QS, GOOD])
-    run_real(tmp_path, client, answers(work=edit("y = 2\n")))
-    sent = json.dumps(client.calls[2:])  # explain-back questions and grading
+    client = FakeClient([GATE_OK, COACH])
+    run = run_real(tmp_path, client, answers(work=edit("y = 2\n")), can_read_files=False)
+    sent = json.dumps(client.calls)
     for leak in ("y = 2", "x = 1", "app.py"):
         assert leak not in sent, f"{leak!r} is file content and must stay local"
+    assert len(client.calls) == 2, "gate and coach only: no question or grading call"
+    s = run.state
+    assert not s.get("questions") and kinds(run) == ["attempt", "coach_next", "work"]
+    assert s["current_node"] == "scorecard" and s["level"] == 1, "no explain-back auto-drop"
+    assert (run.sessions / "real-test.json").exists(), "the record still saves"
 
 
 def test_keep_diffs_writes_diff_only_when_enabled(tmp_path):

@@ -156,11 +156,12 @@ def test_consent_refused_runs_ticket_only_and_sends_no_file_content(tmp_path):
     root, data = prep(tmp_path, profile=None, consent=None)
     (root / "app.py").write_text("SENTINEL_FILE_BODY_55 = 1\n")
     reply = ChatResult("Which file?", [], 3)
-    client = FakeClient([GATE_OK, reply, QS, GOOD])
-    r = go(root, data, ["", "n", *one_ticket(root)], client=client)
+    client = FakeClient([GATE_OK, reply])
+    r = go(root, data, ["", "n", *one_ticket(root)[: -len(ANSWERS)]], client=client)
     assert "[!] ticket-and-plan-only coaching" in r.out
     assert not FolderConfig(data).consented(root)
-    assert client.calls, "the session did call the model"
+    assert len(client.calls) == 2, "gate and coach only: explain-back is skipped"
+    assert "scorecard" in r.out and "ownership" not in r.out
     assert all(tools is None for _m, tools in client.calls)
     sent = json.dumps(client.calls)
     for leak in ("SENTINEL_FILE_BODY_55", "y = 2", "z = 3", "app.py"):

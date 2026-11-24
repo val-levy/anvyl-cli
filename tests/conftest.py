@@ -87,6 +87,7 @@ def run_real(
     ticket="Add retry to fetch",
     high_stakes=False,
     keep_diffs=False,
+    can_read_files=True,
 ):
     """Drive build_real_graph with scripted answers.
 
@@ -102,7 +103,7 @@ def run_real(
     state0 = initial_real_state(
         session_id, ticket, str(root), "professional", mode, level, high_stakes, str(work_dir)
     )
-    coach = RealCoach(client, root, Profile.PROFESSIONAL, can_read_files=False)
+    coach = RealCoach(client, root, Profile.PROFESSIONAL, can_read_files=can_read_files)
     queues = {k: list(v) if isinstance(v, list) else [v] for k, v in answers.items()}
     payloads: list[dict] = []
 
