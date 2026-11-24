@@ -420,3 +420,28 @@ def test_redact_config_files_broad_rule(path, text, secret):
 @pytest.mark.parametrize("line", ["max_tokens: 1024\n", "token_count: 0\n", "debug: true\n"])
 def test_redact_config_token_numbers_stay(line):
     assert redact(line, "config.yaml") == (line, 0)
+
+
+@pytest.mark.parametrize(
+    "path,text,secret",
+    [
+        ("Dockerfile", "ENV DB_PASSWORD=hunter2\n", "hunter2"),
+        ("notes.txt", "password: hunter2\n", "hunter2"),
+        ("passwords.txt", "admin password = hunter2\n", "hunter2"),
+        ("x.tfvars", "db_password = hunter2\n", "hunter2"),
+        ("Makefile", "API_KEY = abc123\n", "abc123"),
+        ("x.foo", "secret: abc123\n", "abc123"),
+        ("deploy.sh", "password=hunter2\n", "hunter2"),
+        ("nb.ipynb", "password = hunter2\n", "hunter2"),
+    ],
+)
+def test_redact_unknown_and_text_files_get_config_rule(path, text, secret):
+    out, n = redact(text, path)
+    assert secret not in out and n > 0
+
+
+@pytest.mark.parametrize("path", ["x.go", "X.java", "x.md", "x.rs", "x.c"])
+@pytest.mark.parametrize("line", _SOURCE_NEGATIVES)
+def test_redact_code_extensions_keep_code(path, line):
+    text = line + "\n"
+    assert redact(text, path) == (text, 0)

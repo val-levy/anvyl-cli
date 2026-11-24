@@ -187,23 +187,28 @@ _ENV_LINE = re.compile(
 )
 # config-file style line (env, INI, properties, YAML): any unquoted value to end of line
 _CONFIG_LINE = re.compile(
-    r"(?mi)(^[ \t]*(?:export[ \t]+|-[ \t]+)?(" + _KEY + ")" + _SEP + ")(" + _VAL + ")"
+    r"(?mi)(^[ \t]*(?:(?:export|-|[\w.-]{1,64})[ \t]+){0,3}("
+    + _KEY
+    + ")"
+    + _SEP
+    + ")("
+    + _VAL
+    + ")"
 )
-_CONFIG_EXTS = {".ini", ".cfg", ".conf", ".properties", ".yaml", ".yml", ".toml", ".json", ".env"}
-_CONFIG_NAMES = {"credentials", ".netrc", ".pgpass"}
+# Source treatment only for known code/markup; anything else (text, Dockerfile, tfvars,
+# shell, notebooks, config, unknown) gets the broad config rule. Fail-safe default.
+# Shell is config-broad: lowercase `password=x` there is a real assignment, not code.
+_CODE_EXTS = set(
+    ".py .pyi .js .jsx .mjs .cjs .ts .tsx .go .java .kt .kts .scala .rb .rs .c .h .cc"
+    " .cpp .hpp .cs .swift .php .m .mm .lua .pl .r .jl .dart .ex .exs .erl .hs .ml .clj"
+    " .sql .md .rst .html .css .scss .vue .svelte".split()
+)
 
 
 def _is_config(path: str | None) -> bool:
     if path is None:
-        return True  # unknown: privacy-safe default
-    name = PurePosixPath(path.replace("\\", "/")).name.lower()
-    p = PurePosixPath(name)
-    return (
-        name in _CONFIG_NAMES
-        or name.startswith(".env")
-        or p.suffix in _CONFIG_EXTS
-        or (name.startswith(".") and not p.suffix)  # .npmrc-style dotfiles
-    )
+        return True
+    return PurePosixPath(path.replace("\\", "/")).suffix.lower() not in _CODE_EXTS
 
 
 def _sub(m: re.Match[str]) -> str:
