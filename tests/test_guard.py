@@ -255,3 +255,88 @@ def test_redact_quoted_literal_keeps_surrounding_code() -> None:
     assert "my pass" not in out
     assert out.endswith("+ suffix")
     assert n == 1
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("DB_PASSWORD=hunter2\r\nX=1\r\n", "hunter2"),
+        ("password: hunter2\r\nX: 1\r\n", "hunter2"),
+        ("[db]\npassword = hunter2\n", "hunter2"),
+        ("Password = hunter2\n", "hunter2"),
+        ("db_password = hunter2\n", "hunter2"),
+        ("api-key = abc123\n", "abc123"),
+        ("client_secret: abc123\n", "abc123"),
+        ("db.password=hunter2\n", "hunter2"),
+        ("spring.datasource.password=hunter2\n", "hunter2"),
+        ("  - password: hunter2 # note\n", "hunter2"),
+        ("export API_KEY=abc123\n", "abc123"),
+    ],
+)
+def test_redact_config_file_forms(text: str, secret: str) -> None:
+    out, n = redact(text)
+    assert secret not in out
+    assert n == 1
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "max_tokens: 1024",
+        "token_count = 0",
+        "use_token: true",
+        "TOKEN = None",
+        "secret: null",
+        "ratio_token: 0.5",
+    ],
+)
+def test_redact_ignores_numbers_and_literals_words(code: str) -> None:
+    assert redact(code + "\n") == (code + "\n", 0)
+
+
+def test_redact_adversarial_single_lines_are_fast() -> None:
+    import time
+
+    for text in [
+        "a-" * 100_000,
+        "a" * 200_000,
+        " " * 200_000,
+        "password=" * 25_000,
+        "token: '" * 25_000,
+        "-----BEGIN PRIVATE KEY-----" * 8_000,
+    ]:
+        start = time.perf_counter()
+        redact(text)
+        assert time.perf_counter() - start < 2
+
+
+def test_redact_overlong_and_unterminated_quoted_values() -> None:
+    long_secret = "s3cr3t" * 900
+    out, n = redact(f'password = "{long_secret}"\nnext')
+    assert "s3cr3t" not in out
+    assert out.endswith("\nnext")
+    assert n == 1
+    out, n = redact("api_key = 'abc123unterminated\nnext")
+    assert "abc123" not in out
+    assert out.endswith("\nnext")
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ("DB_PWD=hunter2\n", "hunter2"),
+        ("db_pwd = 'hunter2'\n", "hunter2"),
+        ("DB_PWD: hunter2\n", "hunter2"),
+        ("db-pwd = hunter2\n", "hunter2"),
+        ("PWD=hunter2\n", "hunter2"),
+    ],
+)
+def test_redact_pwd_suffix_keys(text: str, secret: str) -> None:
+    out, n = redact(text)
+    assert secret not in out
+    assert n == 1
+
+
+@pytest.mark.parametrize("code", ["pwd = os.getcwd()", "pwd = x", "pwd = 'x'", "pwd: here"])
+def test_redact_bare_lowercase_pwd_untouched(code: str) -> None:
+    assert redact(code + "\n") == (code + "\n", 0)

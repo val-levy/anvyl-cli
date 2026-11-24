@@ -154,7 +154,9 @@ def list_files(root: Path, profile: Profile) -> list[str]:
 
 _KW = r"(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)"
 # Unquoted values only on env/YAML-style lines and never call-like (value runs to end of line).
-_VAL = r"[^\s\"'`(){}\[\]]{1,500}(?=[ \t]*(?:\#.*)?$)"
+# keyword anywhere in the key; pwd only as PWD or a *_pwd / *-pwd suffix
+_KEY = r"(?:[\w.-]{0,64}" + _KW + r"[\w.-]{0,64}|[\w.-]{0,64}[_-]pwd|(?-i:PWD))"
+_VAL = r"[^\s\"'`(){}\[\]]{1,500}(?=[ \t]*(?:\#.*)?\r?$)"
 _SEP = r"[ \t]*[:=](?!=)[ \t]*"
 _REDACTIONS = [
     # Body excludes "-----" so a repeated BEGIN header fails fast (linear time).
@@ -171,19 +173,14 @@ _REDACTIONS = [
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),
     # quoted literal: keep the key, drop the value
     re.compile(
-        r"""(?i)(\b[\w.-]{0,64}""" + _KW + r"""[\w.-]{0,64}["']?""" + _SEP + r""")"""
-        r"""(?:"[^"\n]{0,2000}"|'[^'\n]{0,2000}')"""
+        r"""(?i)(\b""" + _KEY + r"""["']?""" + _SEP + r""")"""
+        r"""(?:"[^"\n]*"?|'[^'\n]*'?)"""  # to closing quote, or end of line
     ),
-    # UPPER_SNAKE env style, unquoted
+    # config-file style line (env, INI, properties, YAML): unquoted, not a number/bool/null
     re.compile(
-        r"(?m)(^[ \t]*(?:export[ \t]+)?(?=[A-Z0-9_]{0,64}"
-        r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY))[A-Z][A-Z0-9_]{0,64}"
-        + _SEP
-        + ")"
-        + _VAL
+        r"(?mi)(^[ \t]*(?:export[ \t]+|-[ \t]+)?" + _KEY + _SEP + ")"
+        r"(?!(?:\d[\d._]*|true|false|none|null)[ \t]*(?:\#.*)?\r?$)" + _VAL
     ),
-    # whole lowercase key: `key=val` (no spaces) or YAML `key: val`
-    re.compile(r"(?mi)(^[ \t]*" + _KW + r"(?:=(?!=)|[ \t]*:[ \t]*))" + _VAL),
 ]
 
 
