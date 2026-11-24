@@ -1,3 +1,3 @@
-"""Human-most-of-the-loop harness, v1 prototype."""
+"""Anvyl: human-most-of-the-loop coding coach."""
 
 __version__ = "0.1.0"

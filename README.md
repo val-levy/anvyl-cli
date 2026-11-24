@@ -1,15 +1,15 @@
-# harness — human-most-of-the-loop coding harness
+# anvyl — human-most-of-the-loop coding coach
 
 The human is the driver. The AI is the navigator.
 
-Most agent harnesses optimize for autonomy: do the task, don't bother the
+Most coding agents optimize for autonomy: do the task, don't bother the
 human. This one optimizes for human thinking. AI never just does the task
 and hands it back. You do the thinking; AI helps you think better. And it
 makes the trade-off visible: how much more productive you are with AI
 versus without it, and how much understanding each level of AI control
 costs you.
 
-See the full design in `../HARNESS-V1-SPEC.md`.
+See the design in `docs/superpowers/specs/2026-11-23-real-repo-release-design.md`, the plan in `docs/superpowers/plans/2026-11-23-anvyl-phase1-local.md`, and the dogfood guide in `docs/DOGFOOD.md`.
 
 ## Install
 
@@ -24,22 +24,22 @@ python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-This installs the `harness` command.
+This installs the `anvyl` command. For real tickets in a project folder, see `docs/DOGFOOD.md`; the commands below run the built-in tutorial.
 
 ## Quickstart
 
 ```bash
 # First task: a tiny toy task, the exponential-backoff retry helper.
 # It exercises the full Learn loop but stays trivial to verify.
-harness --task toy-backoff --mode learn
+anvyl tutorial --task toy-backoff --mode learn
 
 # Fast path, no attempt gate, no explain-back (unless high-stakes):
-harness --task toy-backoff --mode ship
+anvyl tutorial --task toy-backoff --mode ship
 
 # Second example task, from the WiFi sensing project:
-harness --task wifi-csi-backoff --mode learn
+anvyl tutorial --task wifi-csi-backoff --mode learn
 
-harness --list-tasks
+anvyl tutorial --list-tasks
 ```
 
 When stdin is not a terminal (or with `--demo`), the run is scripted:
@@ -77,7 +77,7 @@ always require explain-back.
 | L4 | Autonomous | Checkpoints only, for boring low-learning tasks. |
 
 You have to consciously turn the level up. If your ownership score
-drops below 0.5, the harness drops you back to L1 automatically.
+drops below 0.5, anvyl drops you back to L1 automatically.
 
 ## CLI
 
@@ -103,7 +103,7 @@ model (Claude via OpenRouter):
 
 ```bash
 export OPENROUTER_API_KEY="..."        # standard path
-harness --task toy-backoff --mode learn --live
+anvyl tutorial --task toy-backoff --mode learn --live
 ```
 
 No key is ever stored in the repo. Without a key, `--live`
@@ -127,24 +127,24 @@ Bundled examples: skills `toy-backoff`, `wifi-csi`; plugins `wifi-csi`,
 ## Data
 
 All runtime data lives in one dir, resolved as `--data-dir` >
-`$HARNESS_HOME` > `~/.harness`:
+`$ANVYL_HOME` > `~/.anvyl`:
 
 ```
-~/.harness/
+~/.anvyl/
   sessions/           session JSON logs (one per run)
   checkpoints.sqlite  LangGraph checkpointer (resumable sessions)
   skills/             your skills (bundled examples seeded on first run)
   plugins/            your plugins (bundled examples seeded on first run)
 ```
 
-Resume a blocked session with `harness --session <id>` (re-answers the
+Resume a blocked session with `anvyl tutorial --session <id>` (re-answers the
 pending interrupt).
 
 ## Layout
 
 ```
 pyproject.toml          packaging, entry point, ruff/mypy/pytest config
-src/harness/
+src/anvyl/
   __init__.py  __main__.py  cli.py       Rich CLI + slash commands
   state.py     typed LangGraph state
   graph.py     the directed graph + interrupt/resume driver helper
@@ -162,25 +162,25 @@ tests/         pytest: policy, judge, tasks, graph, coach, registry, storage
 
 ```bash
 pip install -e ".[dev]"
-pytest            # 42 tests
+pytest
 ruff check src tests
 ruff format --check src tests
-mypy src/harness
+mypy src/anvyl
 ```
 
-## Verification (2026-11-24, this repo)
+## Verification (v1 demo, pre-rename)
 
 - `pytest`: 42 passed, covering the attempt gate, the stripper, the
   judge, plugin gating, level auto-drop, task verification, the full
   Learn loop, the Ship fast path, the gate proof (no attempt -> coach
   never runs, no code exists), Ship high-stakes explain-back, and the
   live-coach fallback.
-- `ruff check`, `ruff format --check`, `mypy src/harness`: all clean.
-- `harness --task toy-backoff --mode learn` (demo): ownership 100%,
+- `ruff check`, `ruff format --check`, `mypy src/anvyl`: all clean.
+- `anvyl tutorial --task toy-backoff --mode learn` (demo): ownership 100%,
   verify passed (6/6 checks), session JSON saved.
-- `harness --task toy-backoff --mode ship`: AI-drafted, verify passed,
+- `anvyl tutorial --task toy-backoff --mode ship`: AI-drafted, verify passed,
   explain-back correctly skipped.
-- `harness --task wifi-csi-backoff --mode learn`: verify passed.
+- `anvyl tutorial --task wifi-csi-backoff --mode learn`: verify passed.
 - Interactive run via piped stdin: ownership 100%, verify passed.
 - Empty attempt in interactive mode: gate blocks, session saved for
   resume with `--session`.

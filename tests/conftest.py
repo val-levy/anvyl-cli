@@ -1,4 +1,4 @@
-"""Shared helpers for the harness tests."""
+"""Shared helpers for the anvyl tests."""
 
 from __future__ import annotations
 
