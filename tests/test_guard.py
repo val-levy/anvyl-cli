@@ -126,7 +126,7 @@ def test_redact_aws_key_and_private_key_block() -> None:
 
 
 def test_redact_leaves_normal_code_alone() -> None:
-    code = "print(password_field)\ndef token_count(n): return n\n"
+    code = 'password_field = form.get("x")\ndef token_count(n): return n\n'
     assert redact(code) == (code, 0)
 
 
@@ -228,3 +228,30 @@ def test_resolve_inside_matches_listing_filters(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         resolve_inside(tmp_path, "secrets.json")
     assert resolve_inside(tmp_path, "secrets.json", Profile.PERSONAL).name == "secrets.json"
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'password_field = form.get("x")',
+        "pwd = os.getcwd()",
+        "tokens = tokenize(text)",
+        "max_tokens: 1024",
+        "password_hash = bcrypt(x)",
+        "token_count: int = 0",
+        "def f(api_key: str = None):",
+        "const secretKey = getSecret();",
+        "if token == expected:",
+        "x = {'token': token}",
+        'SECRET_KEY = os.environ["X"]',
+    ],
+)
+def test_redact_leaves_ordinary_code_alone(code: str) -> None:
+    assert redact(code + "\n") == (code + "\n", 0)
+
+
+def test_redact_quoted_literal_keeps_surrounding_code() -> None:
+    out, n = redact("password = 'my pass' + suffix")
+    assert "my pass" not in out
+    assert out.endswith("+ suffix")
+    assert n == 1

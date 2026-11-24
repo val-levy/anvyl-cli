@@ -152,7 +152,10 @@ def list_files(root: Path, profile: Profile) -> list[str]:
     return sorted(keep)
 
 
-_KEY = r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)"
+_KW = r"(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)"
+# Unquoted values only on env/YAML-style lines and never call-like (value runs to end of line).
+_VAL = r"[^\s\"'`(){}\[\]]{1,500}(?=[ \t]*(?:\#.*)?$)"
+_SEP = r"[ \t]*[:=](?!=)[ \t]*"
 _REDACTIONS = [
     # Body excludes "-----" so a repeated BEGIN header fails fast (linear time).
     re.compile(
@@ -166,16 +169,31 @@ _REDACTIONS = [
     re.compile(r"\bgh[opsu]_[A-Za-z0-9]{20,}"),
     re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),
+    # quoted literal: keep the key, drop the value
     re.compile(
-        r"(?i)\b[\w.-]{0,64}" + _KEY + r"""[\w.-]{0,64}["']?[ \t]*[:=][ \t]*"""
-        r"""(?!\[redacted\])(?:"[^"\n]*"|'[^'\n]*'|\S+)"""
+        r"""(?i)(\b[\w.-]{0,64}""" + _KW + r"""[\w.-]{0,64}["']?""" + _SEP + r""")"""
+        r"""(?:"[^"\n]{0,2000}"|'[^'\n]{0,2000}')"""
     ),
+    # UPPER_SNAKE env style, unquoted
+    re.compile(
+        r"(?m)(^[ \t]*(?:export[ \t]+)?(?=[A-Z0-9_]{0,64}"
+        r"(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY))[A-Z][A-Z0-9_]{0,64}"
+        + _SEP
+        + ")"
+        + _VAL
+    ),
+    # whole lowercase key: `key=val` (no spaces) or YAML `key: val`
+    re.compile(r"(?mi)(^[ \t]*" + _KW + r"(?:=(?!=)|[ \t]*:[ \t]*))" + _VAL),
 ]
+
+
+def _sub(m: re.Match[str]) -> str:
+    return (m.group(1) if m.re.groups else "") + "[redacted]"
 
 
 def redact(text: str) -> tuple[str, int]:
     total = 0
     for pat in _REDACTIONS:
-        text, n = pat.subn("[redacted]", text)
+        text, n = pat.subn(_sub, text)
         total += n
     return text, total
