@@ -455,3 +455,47 @@ def test_redact_config_names_win_over_code_suffix(path: str) -> None:
 
 def test_redact_real_source_file_still_gets_source_treatment() -> None:
     assert redact("password = compute()\n", "app.py")[1] == 0
+
+
+def test_list_files_does_not_run_repo_fsmonitor(tmp_path: Path) -> None:
+    repo = tmp_path / "r"
+    repo.mkdir()
+    marker = tmp_path / "marker"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)
+    subprocess.run(["git", "config", "core.fsmonitor", str(hook)], cwd=repo, check=True, env=env)
+    (repo / "a.py").write_text("x = 1\n")
+    assert "a.py" in list_files(repo, Profile.PERSONAL)
+    assert not marker.exists()
+
+
+def test_git_env_overrides_are_ignored(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / "a.py").write_text("x = 1\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    assert list_files(repo, Profile.PERSONAL) == ["a.py"]
+
+
+def test_redacts_url_userinfo_and_query_secrets() -> None:
+    t, n = redact("see https://bob:hunter2@example.com/x and http://u@h/")
+    assert "hunter2" not in t and "bob" not in t and "https://[redacted]@example.com/x" in t
+    assert n >= 1
+    t, _ = redact("GET /a?x=1&api_key=ABC123&token=zzz9 HTTP", "a.py")
+    assert "ABC123" not in t and "zzz9" not in t and "x=1" in t
+    t, _ = redact("https://h/p?password=pw1#frag", "a.py")
+    assert "pw1" not in t
+
+
+def test_env_py_is_config_not_code() -> None:
+    t, _ = redact("password = hunter22\n", ".env.py")
+    assert "hunter22" not in t
+    t, _ = redact("password = hunter22\n", "prod.env.js")
+    assert "hunter22" not in t

@@ -63,11 +63,26 @@ def resolve_inside(root: Path, rel: str, profile: Profile = Profile.PROFESSIONAL
     return target
 
 
+_GIT = ["git", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
+
+
+def _git_env() -> dict[str, str]:
+    # A hostile repo config or inherited GIT_* vars must not redirect or execute anything.
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"}
+        and not k.startswith("GIT_CONFIG")
+    }
+
+
 def _git_files(root: Path) -> list[str] | None:
+    env = _git_env()
     try:
         inside = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [*_GIT, "rev-parse", "--is-inside-work-tree"],
             cwd=root,
+            env=env,
             capture_output=True,
             text=True,
             check=False,
@@ -75,8 +90,9 @@ def _git_files(root: Path) -> list[str] | None:
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             return None
         out = subprocess.run(
-            ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+            [*_GIT, "ls-files", "-co", "--exclude-standard", "-z"],
             cwd=root,
+            env=env,
             capture_output=True,
             check=False,
         )
@@ -170,6 +186,12 @@ _REDACTIONS = [
     re.compile(r"\bgithub_pat_\w{20,}"),
     re.compile(r"\bgh[opsu]_[A-Za-z0-9]{20,}"),
     re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"),
+    # URL userinfo: keep scheme/host, drop credentials (linear: bounded classes)
+    re.compile(r"(?i)(\b[a-z][a-z0-9+.-]{0,20}://)[^\s/?#@\"'<>]{1,200}(?=@)"),
+    # query-string secrets: keep the parameter name
+    re.compile(
+        r"(?i)([?&](?:token|key|secret|api[_-]?key|access[_-]?token|password)=)[^\s&#\"'<>]{1,500}"
+    ),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),
     # quoted literal: keep the key, drop the value
     re.compile(
