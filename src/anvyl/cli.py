@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import shutil
 import sys
 import time
@@ -374,7 +375,7 @@ class Runner:
             return result
 
 
-SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset", "history")
+SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset", "history", "harness")
 # The old top-level tutorial flags stay accepted (hidden) and mean `anvyl tutorial ...`.
 LEGACY_FLAGS = {
     "--task",
@@ -412,6 +413,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("preview", "show what would be sent to the model for a ticket (no network)").add_argument(
         "ticket", nargs="+"
     )
+    h = add("harness", "author sub-harnesses: init <id> | validate <dir> | pack <dir>")
+    h.add_argument("action", choices=["init", "validate", "pack"])
+    h.add_argument("target", help="harness id (init) or bundle folder (validate, pack)")
     t = add("tutorial", "run the built-in tutorial tasks")
     t.add_argument(
         "--task",
@@ -533,6 +537,26 @@ def run_reset(data_dir: Path) -> int:
     return 0
 
 
+def run_harness(args: argparse.Namespace, console: Console) -> int:
+    from . import harness as hs
+
+    try:
+        if args.action == "init":
+            dest = hs.scaffold(Path.cwd() / args.target, args.target)
+            console.print(f"created {dest}/ : edit harness.toml and prompt.md, then validate")
+            return 0
+        h = hs.load(Path(args.target))
+    except hs.HarnessError as e:
+        for p in e.problems:
+            console.print(f"rejected: {p}", markup=False, highlight=False)
+        return 1
+    if args.action == "validate":
+        console.print(f"ok: {h.id} v{h.version} ({h.base} base, cap L{h.max_level})")
+    else:
+        console.print_json(json.dumps(h.index_entry()))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(_route(list(sys.argv[1:] if argv is None else argv)))
     console = Console()
@@ -550,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "history":
         render_history(load_sessions(sessions_dir(data_dir)), console)
         return 0
+    if args.cmd == "harness":
+        return run_harness(args, console)
     if args.cmd == "preview":
         preview(Path.cwd(), data_dir, console, " ".join(args.ticket))
         return 0

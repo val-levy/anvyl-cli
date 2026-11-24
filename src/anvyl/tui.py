@@ -55,7 +55,8 @@ COMMANDS = {
     "/skill": "list | load | unload <id>",
     "/graph": "show the loop steps",
     "/rail": "toggle the status rail",
-    "/mode": "ship | learn",
+    "/mode": "learn | ship | <harness>  (menu)",
+    "/harness": "list, install <folder>, remove <id>",
     "/level": "coaching level 0-2",
     "/profile": "professional | personal",
     "/keepdiffs": "on | off (personal only)",
@@ -116,7 +117,7 @@ def status_fragments(s: Session) -> FormattedText:
     parts = [
         *([model.split("/")[-1]] if model else []),
         s.profile.value,
-        f"mode {v.get('mode', s.mode)}",
+        f"mode {getattr(getattr(s, 'harness', None), 'id', None) or v.get('mode', s.mode)}",
         f"L{v.get('level', s.level)}",
         f"gate {gate}",
         f"files {files}",

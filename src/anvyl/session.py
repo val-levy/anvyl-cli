@@ -35,6 +35,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from . import guard, tui
+from . import harness as hs
 from . import models as modelcat
 from .auth import get_api_key
 from .changes import clear_snapshot
@@ -173,6 +174,7 @@ class Session:
         self.saver: SqliteSaver | None = None
         self.t0 = time.monotonic()
         self.last_answer = ""
+        self.harness: hs.Harness | None = None
         self.plugins = PluginRegistry(data_dir / "plugins")
         self.skills = SkillRegistry(data_dir / "skills")
 
@@ -290,11 +292,9 @@ class Session:
             self.rail = not self.rail
             self.say(f"rail {'on' if self.rail else 'off'}")
         elif cmd == "/mode":
-            if arg in ("ship", "learn"):
-                self.mode = arg
-                self.say(f"mode -> {arg} (applies from the next ticket)")
-            else:
-                self.say("usage: /mode ship|learn")
+            self.pick_mode(arg)
+        elif cmd == "/harness":
+            self.harness_cmd(args)
         elif cmd == "/level":
             if not (arg.isascii() and arg.isdigit()):
                 self.say(f"usage: /level 0-{REAL_MAX_LEVEL}")
@@ -338,6 +338,62 @@ class Session:
                 self.say(f"copied {what} ({len(text)} chars)", MUTED)
             except (OSError, subprocess.SubprocessError):
                 self.say("clipboard copy failed", RED)
+
+    def pick_mode(self, arg: str) -> None:
+        """/mode [ship|learn|<harness id>]; with no argument, an interactive menu."""
+        found = hs.installed(self.data_dir)
+        ui = getattr(self.console, "ui", None)
+        if not arg and ui:
+            cur = self.harness.id if self.harness else self.mode
+            names = ["learn", "ship", *found]
+            pitch = {"learn": "attempt gate first, then the coach", "ship": "AI may draft code"}
+            rows = [
+                (f"{'●' if n == cur else ' '} {n}", pitch.get(n) or found[n].pitch) for n in names
+            ]
+            i = ui.choose("mode", rows)
+            arg = names[i] if i is not None else ""
+            if not arg:
+                return
+        if arg in hs.BUILTIN_MODES:
+            self.mode, self.harness = arg, None
+            self.say(f"mode -> {arg} (applies from the next ticket)")
+        elif arg in found:
+            h = found[arg]
+            warn = f"{h.id} has no attempt gate (AI may draft). Use it? [y/N] "
+            if h.base == "ship" and self.ask(warn).lower() not in ("y", "yes"):
+                return
+            self.mode, self.harness = h.base, h
+            self.say(f"mode -> {h.id} ({h.base} base, level cap L{h.max_level}); next ticket")
+        else:
+            self.say("usage: /mode ship|learn|<harness id>   (/harness lists yours)")
+
+    def harness_cmd(self, args: list[str]) -> None:
+        """/harness [install <folder>|remove <id>]; with nothing, the same menu as /mode."""
+        sub, ident = (args[0].lower() if args else ""), (args[1] if len(args) > 1 else "")
+        if sub == "install" and ident:
+            try:
+                h = hs.install(Path(ident).expanduser(), self.data_dir)
+            except hs.HarnessError as e:
+                for p in e.problems[:6]:
+                    self.say(f"rejected: {_clean(p, 160)}", RED)
+                return
+            self.say(f"installed {h.id} v{h.version} ({h.base} base, cap L{h.max_level})")
+        elif sub == "remove" and ident in hs.installed(self.data_dir):
+            shutil.rmtree(self.data_dir / "harnesses" / ident, ignore_errors=True)
+            if self.harness and self.harness.id == ident:
+                self.mode, self.harness = "learn", None
+            self.say(f"removed {ident}")
+        elif sub in ("", "list"):
+            found = hs.installed(self.data_dir)
+            if not found:
+                self.say("no harnesses installed. Author one: `anvyl harness init <id>`", MUTED)
+            elif getattr(self.console, "ui", None):
+                self.pick_mode("")
+            else:
+                for h in found.values():
+                    self.say(f"{h.id} v{h.version}  {h.pitch}")
+        else:
+            self.say("usage: /harness  |  /harness install <folder>  |  /harness remove <id>")
 
     def set_model(self, chosen: modelcat.Model) -> None:
         if self.client is not None:
@@ -504,7 +560,10 @@ class Session:
         marks.mkdir(parents=True, exist_ok=True)
         (marks / sid).touch()
         try:
-            coach = RealCoach(self.client, self.root, self.profile, self.can_read)
+            h = self.harness
+            coach = RealCoach(
+                self.client, self.root, self.profile, self.can_read, h.guidance if h else ""
+            )
             graph = build_real_graph(
                 coach,
                 self.client,
@@ -516,8 +575,8 @@ class Session:
                 self.cfg.keep_diffs(self.root),
             )
             state0 = initial_real_state(
-                sid, ticket, str(self.root), self.profile.value, self.mode, self.level, False,
-                str(work),
+                sid, ticket, str(self.root), self.profile.value, self.mode,
+                min(self.level, h.max_level) if h else self.level, False, str(work),
             )  # fmt: skip
             self.view = state0
             if not self.console.is_terminal:  # the TUI status bar already shows this
