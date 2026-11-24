@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import stat
 import time
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from rich.text import Text
 from .grader import _clean
 
 MIN_PER_LEVEL = 3
+MAX_BYTES = 1_000_000
 _BIG = 1e11  # beyond any real epoch / duration / line count
 
 
@@ -32,9 +34,12 @@ def load_sessions(sessions_dir: Path) -> list[dict]:
         return rows
     for p in paths:
         try:
+            st = p.lstat()  # lstat: a symlink is never followed
+            if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_BYTES:
+                continue
             rec = json.loads(p.read_text())
-        except (OSError, ValueError, RecursionError):
-            continue
+        except (OSError, ValueError, RecursionError, MemoryError):
+            continue  # UnicodeDecodeError is a ValueError
         if isinstance(rec, dict):
             rec.setdefault("schema_version", 1)
             rec.setdefault("profile", "tutorial")
@@ -84,17 +89,15 @@ def _you_pct(rec: dict) -> str:
 
 def _mins(v: object) -> str:
     n = _num(v)
-    return "-" if n is None or n < 0 else f"{n / 60:.0f}m"
+    return "-" if n is None or n <= 0 else f"{n / 60:.0f}m"
 
 
 def summary_lines(rows: list[dict]) -> list[str]:
     by_level: dict[int, list[float]] = {}
-    counts: dict[int, int] = {}
     for r in rows:
         lvl = _level(r)
         if lvl is None:
             continue
-        counts[lvl] = counts.get(lvl, 0) + 1
         own = _ownership(r)
         if own is not None:
             by_level.setdefault(lvl, []).append(own)
@@ -102,10 +105,8 @@ def summary_lines(rows: list[dict]) -> list[str]:
     parts = [f"L{lvl} {means[lvl]:.0f}%" for lvl in sorted(means)]
     lines = ["Mean ownership: " + (", ".join(parts) if parts else "-")]
     if (
-        counts.get(1, 0) >= MIN_PER_LEVEL
-        and counts.get(2, 0) >= MIN_PER_LEVEL
-        and 1 in means
-        and 2 in means
+        len(by_level.get(1, ())) >= MIN_PER_LEVEL
+        and len(by_level.get(2, ())) >= MIN_PER_LEVEL
         and means[2] < means[1]
     ):
         lines.append("L2 sessions averaged lower ownership than L1.")

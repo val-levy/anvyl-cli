@@ -96,3 +96,29 @@ def test_cli_history(tmp_path, monkeypatch, capsys):
     assert cli.main(["history"]) == 0
     out = capsys.readouterr().out
     assert "My ticket" in out and "L1 50%" in out
+
+
+def test_correlation_counts_only_scored_sessions():
+    rows = [_rec(i, 1, 0.9) for i in range(3)]
+    rows += [_rec(10, 2, 0.3), _rec(11, 2, None), _rec(12, 2, None)]
+    assert "lower" not in "\n".join(summary_lines(rows))
+    rows[4]["ownership_score"] = rows[5]["ownership_score"] = 0.3
+    assert "lower" in "\n".join(summary_lines(rows))
+
+
+def test_load_skips_symlinks_dirs_and_oversize(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"session_id": "evil"}))
+    d = tmp_path / "sessions"
+    d.mkdir()
+    (d / "link.json").symlink_to(outside)
+    (d / "dir.json").mkdir()
+    (d / "big.json").write_text(json.dumps({"session_id": "big", "pad": "x" * 1_100_000}))
+    _write(d, "ok", {"session_id": "ok"})
+    assert [r["session_id"] for r in load_sessions(d)] == ["ok"]
+
+
+def test_minutes_dash_for_nonpositive():
+    from anvyl.history import _mins
+
+    assert _mins(0) == "-" and _mins(-5) == "-" and _mins(120) == "2m"
