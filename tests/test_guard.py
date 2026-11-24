@@ -126,5 +126,105 @@ def test_redact_aws_key_and_private_key_block() -> None:
 
 
 def test_redact_leaves_normal_code_alone() -> None:
-    code = 'password_field = form.get("x")\ndef token_count(n): return n\n'
+    code = "print(password_field)\ndef token_count(n): return n\n"
     assert redact(code) == (code, 0)
+
+
+@pytest.mark.parametrize(
+    ("line", "secret"),
+    [
+        ("DB_PASSWORD=hunter2", "hunter2"),
+        ("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENG", "wJalrXUtnFEMIK7MDENG"),
+        ('"api_key": "abc123xyz"', "abc123xyz"),
+        ("passwd=hunter2", "hunter2"),
+        ("SECRET_KEY = x9y8z7", "x9y8z7"),
+        ('password: "my secret pass"', "secret pass"),
+        ("p = 'a b c'  # token: 'quoted tok'", "quoted tok"),
+        ("Authorization: Bearer abcdefghijklmnop1234", "abcdefghijklmnop1234"),
+        (f"github_pat_{'A' * 30}", "AAAAAAAAAA"),
+        (f"gho_{'z' * 30}", "zzzzzzzzzz"),
+        (f"ghs_{'z' * 30}", "zzzzzzzzzz"),
+    ],
+)
+def test_redact_secret_forms(line: str, secret: str) -> None:
+    out, n = redact(line + "\nnext line")
+    assert secret not in out
+    assert n >= 1
+    assert out.endswith("\nnext line")
+
+
+def test_redact_pem_is_linear_time() -> None:
+    import time
+
+    text = "-----BEGIN RSA PRIVATE KEY-----\n" * 20_000
+    start = time.perf_counter()
+    out, n = redact(text)
+    assert time.perf_counter() - start < 2
+    assert "BEGIN" not in out
+    assert n >= 1
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "id_ed25519",
+        "id_ecdsa.pub",
+        "id_dsa",
+        "a.pfx",
+        "b.jks",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        ".git-credentials",
+        ".ssh/config",
+        "home/.SSH/known_hosts",
+    ],
+)
+def test_denies_more_key_names(rel: str) -> None:
+    assert is_denied(rel, Profile.PERSONAL)
+
+
+def test_anvylignore_gitignore_forms(tmp_path: Path) -> None:
+    _write(tmp_path, ".anvylignore", "/top.txt\nbuild/\nprivate\ndocs/**\n")
+    for rel in [
+        "top.txt",
+        "sub/top.txt",
+        "build/a.txt",
+        "x/build/b.txt",
+        "private/c.txt",
+        "x/private/d.txt",
+        "docs/e.md",
+        "docs/f/g.md",
+        "keep.txt",
+    ]:
+        _write(tmp_path, rel)
+    assert list_files(tmp_path, Profile.PERSONAL) == [".anvylignore", "keep.txt", "sub/top.txt"]
+
+
+def test_listing_excludes_symlink_to_denied(tmp_path: Path) -> None:
+    _write(tmp_path, ".env", "A=1")
+    _write(tmp_path, "ok.txt")
+    try:
+        os.symlink(tmp_path / ".env", tmp_path / "innocent.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    assert list_files(tmp_path, Profile.PERSONAL) == ["ok.txt"]
+
+
+def test_resolve_inside_matches_listing_filters(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    _write(tmp_path, ".gitignore", "gi.txt\n")
+    _write(tmp_path, ".anvylignore", "ai.txt\n")
+    _write(tmp_path, "gi.txt")
+    _write(tmp_path, "ai.txt")
+    _write(tmp_path, "big.txt", b"a" * (MAX_FILE_BYTES + 1))
+    _write(tmp_path, "bin.dat", b"a\x00b")
+    _write(tmp_path, "ok.txt")
+    _write(tmp_path, "secrets.json")
+    for bad in ["gi.txt", "ai.txt", "big.txt", "bin.dat", "missing.txt"]:
+        with pytest.raises(ValueError):
+            resolve_inside(tmp_path, bad)
+    assert resolve_inside(tmp_path, "ok.txt") == (tmp_path / "ok.txt").resolve()
+    with pytest.raises(ValueError):
+        resolve_inside(tmp_path, "secrets.json")
+    assert resolve_inside(tmp_path, "secrets.json", Profile.PERSONAL).name == "secrets.json"

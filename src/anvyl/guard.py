@@ -10,8 +10,23 @@ from anvyl.profile import Profile
 
 MAX_FILE_BYTES = 200_000
 
-_ALWAYS_DIRS = {".git", "node_modules"}
-_ALWAYS = (".env*", "*.pem", "*.key", "id_rsa*", "*.p12")
+_ALWAYS_DIRS = {".git", "node_modules", ".ssh"}
+_ALWAYS = (
+    ".env*",
+    "*.pem",
+    "*.key",
+    "id_rsa*",
+    "*.p12",
+    "id_ed25519*",
+    "id_ecdsa*",
+    "id_dsa*",
+    "*.pfx",
+    "*.jks",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".git-credentials",
+)
 _PROFESSIONAL = ("*secret*", "*credential*", "*.sqlite", "*.db")
 
 
@@ -42,6 +57,9 @@ def resolve_inside(root: Path, rel: str, profile: Profile = Profile.PROFESSIONAL
         raise ValueError(f"path escapes root: {rel}") from None
     if is_denied(norm, profile) or is_denied(inner, profile):
         raise ValueError(f"path denied: {rel}")
+    # Same filters as list_files: ignores, git-ignored, size, binary, symlink targets.
+    if PurePosixPath(norm).as_posix() not in set(list_files(base, profile)):
+        raise ValueError(f"path not readable: {rel}")
     return target
 
 
@@ -86,11 +104,30 @@ def _ignore_patterns(root: Path) -> list[str]:
     return [s for s in (ln.strip() for ln in lines) if s and not s.startswith("#")]
 
 
-def _readable(root: Path, rel: str) -> bool:
+def _ignored(rel: str, patterns: list[str]) -> bool:
+    parts = rel.split("/")
+    for pat in patterns:
+        anchored = pat.startswith("/")
+        dir_only = pat.endswith("/")
+        pat = pat.strip("/")
+        if not pat:
+            continue
+        whole = anchored or "/" in pat
+        for i in range(1, len(parts) + 1):
+            if dir_only and i == len(parts):
+                break
+            cand = "/".join(parts[:i]) if whole else parts[i - 1]
+            if fnmatch(cand, pat):
+                return True
+    return False
+
+
+def _readable(root: Path, rel: str, profile: Profile) -> bool:
     path = root / rel
     try:
         if path.is_symlink():
-            path.resolve().relative_to(root)
+            if is_denied(path.resolve().relative_to(root).as_posix(), profile):
+                return False
         if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
             return False
         with path.open("rb") as f:
@@ -109,20 +146,30 @@ def list_files(root: Path, profile: Profile) -> list[str]:
         rel
         for rel in set(candidates)
         if not is_denied(rel, profile)
-        and not any(fnmatch(rel, p) or fnmatch(Path(rel).name, p) for p in ignores)
-        and _readable(root, rel)
+        and not _ignored(rel, ignores)
+        and _readable(root, rel, profile)
     ]
     return sorted(keep)
 
 
+_KEY = r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)"
 _REDACTIONS = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
+    # Body excludes "-----" so a repeated BEGIN header fails fast (linear time).
+    re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[A-Za-z0-9+/=:,. \t\r\n]|-(?!----)){0,20000}?"
+        r"-----END [A-Z ]*PRIVATE KEY-----"
+    ),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*"),  # truncated block
     re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),
-    re.compile(r"\bghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_\w{20,}"),
+    re.compile(r"\bgh[opsu]_[A-Za-z0-9]{20,}"),
     re.compile(r"\bxox[bp]-[A-Za-z0-9-]{10,}"),
-    re.compile(r"(?i)\b(?:password|secret|token|api_key)\s*[:=]\s*(?!\[redacted\])\S+"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*"),
+    re.compile(
+        r"(?i)\b[\w.-]{0,64}" + _KEY + r"""[\w.-]{0,64}["']?[ \t]*[:=][ \t]*"""
+        r"""(?!\[redacted\])(?:"[^"\n]*"|'[^'\n]*'|\S+)"""
+    ),
 ]
 
 
