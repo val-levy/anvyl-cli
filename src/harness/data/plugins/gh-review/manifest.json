@@ -1,0 +1,1 @@
+{"commands":["/diff"],"description":"Review a diff and leave line comments. Drafts comments only; never approves or merges on its own.","enabled":true,"hooks":["pre-scorecard"],"id":"gh-review","max_level":3,"name":"GitHub review","skills":[],"tools":["gh-diff","gh-comment"],"version":"0.1.0","writes_code":false}

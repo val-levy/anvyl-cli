@@ -1,0 +1,1 @@
+{"commands":["/csi"],"description":"CSI packet context, retry helper, and packet replay tools for the OBG WiFi sensing project.","enabled":true,"hooks":["pre-implement"],"id":"wifi-csi","max_level":2,"name":"WiFi CSI helpers","skills":["wifi-csi"],"tools":["csi-sniff","packet-replay"],"version":"0.1.0","writes_code":false}

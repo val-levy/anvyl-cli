@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Harness runtime data (created on first run under ~/.harness or --data-dir)
+*.sqlite
+*.sqlite-journal
+sessions/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Anvyl
+work/
+.superpowers/
