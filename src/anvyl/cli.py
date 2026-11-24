@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
+import random
 import shutil
 import sys
 import time
@@ -30,6 +32,7 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 
 from . import auth, tasks
@@ -49,20 +52,86 @@ from .storage import (
     sessions_dir,
 )
 
-# Palette (opencode-style, from the mockup): warm dark, warm off-white,
-# one blue accent. Semantic colours only for pass/fail/warning.
-ACCENT = "#5b9dff"
-MUTED = "#9a9898"
-AMBER = "#ff9f0a"
-RED = "#ff3b30"
+
+def light_terminal(env: Mapping[str, str] | None = None) -> bool:
+    """True if COLORFGBG ("fg;bg") reports a light background; dark otherwise."""
+    value = (os.environ if env is None else env).get("COLORFGBG", "")
+    return value.rsplit(";", 1)[-1] in {"7", "15"}
+
+
+# Palette (Mistral brand): amber accent, orange coach, red only for locked/errors.
+# Dark is the default; the light variant is darkened so it stays readable on white.
+if light_terminal():
+    ACCENT, COACH, MUTED, RED = "#b86e00", "#c25a00", "#71717b", "#c20f00"
+else:
+    ACCENT, COACH, MUTED, RED = "#ffaf01", "#ff8204", "#a0a0a8", "#e51300"
 
 MIN_RAIL_WIDTH = 110
+FILL_FRAMES = 12
+SPIN_WORDS = (
+    "Vibing",
+    "Subliminating",
+    "Noodling",
+    "Percolating",
+    "Cogitating",
+    "Marinating",
+    "Discombobulating",
+    "Flibbertigibbeting",
+    "Reticulating",
+    "Combobulating",
+    "Pondering",
+    "Ruminating",
+    "Simmering",
+    "Brewing",
+    "Conjuring",
+    "Spelunking",
+    "Wibbling",
+    "Moseying",
+    "Finagling",
+    "Tinkering",
+    "Puttering",
+    "Smooshing",
+    "Schlepping",
+    "Wrangling",
+    "Musing",
+    "Concocting",
+    "Cerebrating",
+    "Incubating",
+    "Germinating",
+    "Transmuting",
+    "Unfurling",
+    "Frolicking",
+    "Sussing",
+    "Mulling",
+    "Churning",
+    "Whirring",
+    "Shimmying",
+    "Pontificating",
+)
+TYPE_MAX_S = 1.0  # typewriter never delays a reply by more than this
 
 
 def bar(pct: float, width: int = 20) -> str:
     pct = max(0.0, min(100.0, pct))
     filled = int(round(pct / 100 * width))
-    return "[" + "#" * filled + "-" * (width - filled) + f"] {pct:.0f}%"
+    done, todo = "█" * filled, "░" * (width - filled)
+    return f"[{ACCENT}]{done}[/{ACCENT}][{MUTED}]{todo}[/{MUTED}] {pct:.0f}%"
+
+
+def spin_word() -> str:
+    return random.choice(SPIN_WORDS) + "..."
+
+
+def typewrite(console: Console, text: str) -> None:
+    """Print text char by char on a terminal (<= TYPE_MAX_S total), else all at once."""
+    if not console.is_terminal:
+        console.print(text)
+        return
+    delay = min(0.02, TYPE_MAX_S / max(len(text), 1))
+    for ch in text:
+        console.print(ch, end="", markup=False, highlight=False)
+        time.sleep(delay)
+    console.print()
 
 
 def fmt_secs(seconds: float) -> str:
@@ -134,13 +203,14 @@ class InteractiveProvider:
         kind = payload.get("kind")
         prompt = payload.get("prompt", "")
         if kind == "coach_next":
-            ctx.console.print(f"[cyan]coach:[/cyan] {payload.get('text', '')}")
+            ctx.console.print(f"[{COACH}]coach:[/{COACH}] ", end="")
+            typewrite(ctx.console, payload.get("text", ""))
             return self._read_line(prompt, ctx) or ""
         if kind == "review":
             ctx.console.print(Panel(payload.get("text", ""), title="AI draft", border_style=MUTED))
             return self._read_block(prompt, ctx)
         if kind in ("goal", "attempt", "code", "explain"):
-            ctx.console.print(f"[{AMBER}]{prompt}[/{AMBER}]")
+            ctx.console.print(f"[{COACH}]{prompt}[/{COACH}]")
             return self._read_block(">", ctx)
         return self._read_line(prompt or ">", ctx) or ""
 
@@ -234,6 +304,17 @@ class Runner:
         )
 
     def render_scorecard(self, state: Mapping[str, Any]) -> None:
+        if not self.console.is_terminal:
+            self.console.print(self._scorecard_panel(state, 1.0))
+            return
+        with Live(
+            self._scorecard_panel(state, 0.0), console=self.console, auto_refresh=False
+        ) as live:
+            for step in range(1, FILL_FRAMES + 1):
+                time.sleep(0.04)
+                live.update(self._scorecard_panel(state, step / FILL_FRAMES), refresh=True)
+
+    def _scorecard_panel(self, state: Mapping[str, Any], fill: float) -> Panel:
         total = int(state.get("human_lines", 0)) + int(state.get("ai_lines", 0))
         human_pct = (int(state.get("human_lines", 0)) / total * 100) if total else 100.0
         with_ai = float(state.get("time_with_ai_s", 0))
@@ -243,7 +324,7 @@ class Runner:
             f"time        {fmt_secs(with_ai)} with AI / ~{fmt_secs(without)} est. without\n"
             f"authorship  you {human_pct:.0f}% ({state.get('human_lines', 0)} lines) / "
             f"AI {100 - human_pct:.0f}% ({state.get('ai_lines', 0)} lines)\n"
-            f"ownership   {bar(float(state.get('ownership_score', 0)) * 100)}\n"
+            f"ownership   {bar(float(state.get('ownership_score', 0)) * 100 * fill)}\n"
             f"explain     {float(state.get('explain_score', 0)):.0%}\n"
             f"levels      {' -> '.join('L' + str(lvl) for lvl in state.get('level_history', []))}\n"
             f"verify      {verify}\n"
@@ -252,7 +333,7 @@ class Runner:
         for check in (state.get("verification") or {}).get("checks", []):
             mark = "[ok]" if check["passed"] else "[FAIL]"
             body += f"\n  {mark} {check['name']}: {check['detail']}"
-        self.console.print(Panel(body, title="scorecard", border_style=ACCENT))
+        return Panel(body, title="scorecard", border_style=ACCENT)
 
     # -- slash commands ---------------------------------------------------
     def handle_command(self, line: str) -> bool:
@@ -359,22 +440,32 @@ class Runner:
             else:
                 self.render_ministrip(initial)
 
+            # Spinner runs only while the graph/model works, never while waiting on input.
+            spin = self.console.status(spin_word(), spinner="dots", spinner_style=ACCENT)
+
             def on_state(values: Mapping[str, Any]) -> None:
+                spin.stop()
                 self._state_view = dict(values)
 
-            result = drive(
-                self.graph,
-                initial,
-                self.config,
-                lambda payload: self.provider.answer(payload, self),
-                on_state,
-            )
+            def answer(payload: dict) -> str:
+                spin.stop()
+                try:
+                    return self.provider.answer(payload, self)
+                finally:
+                    spin.update(spin_word())
+                    spin.start()
+
+            spin.start()
+            try:
+                result = drive(self.graph, initial, self.config, answer, on_state)
+            finally:
+                spin.stop()
             self._state_view = result
             save_session(result, sessions_dir(self.data_dir))
             if result.get("gate_blocked") and not result.get("gate_passed"):
                 self.console.print(
-                    "[red][locked] attempt gate blocked: no usable human "
-                    "attempt. Session saved; resume with --session.[/red]"
+                    f"[{RED}][locked] attempt gate blocked: no usable human "
+                    f"attempt. Session saved; resume with --session.[/{RED}]"
                 )
             else:
                 self.render_scorecard(result)
