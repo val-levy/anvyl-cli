@@ -36,6 +36,7 @@ from . import auth, tasks
 from .coach import Coach
 from .driver import drive
 from .graph import LOOP_STEPS, build_graph
+from .history import load_sessions, render_history
 from .registry import PluginRegistry, SkillRegistry
 from .session import preview, run_session
 from .state import HarnessState, initial_state
@@ -380,7 +381,7 @@ class Runner:
             return result
 
 
-SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset")
+SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset", "history")
 # The old top-level tutorial flags stay accepted (hidden) and mean `anvyl tutorial ...`.
 LEGACY_FLAGS = {
     "--task",
@@ -414,6 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("login", "store your OpenRouter API key")
     add("logout", "remove the stored API key")
     add("reset", "delete all anvyl data")
+    add("history", "list past sessions with ownership and time summaries")
     add("preview", "show what would be sent to the model for a ticket (no network)").add_argument(
         "ticket", nargs="+"
     )
@@ -552,6 +554,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "reset":
         return run_reset(data_dir)
+    if args.cmd == "history":
+        render_history(load_sessions(sessions_dir(data_dir)), console)
+        return 0
     if args.cmd == "preview":
         preview(Path.cwd(), data_dir, console, " ".join(args.ticket))
         return 0
