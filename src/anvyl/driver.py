@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from langgraph.errors import GraphInterrupt
@@ -17,11 +18,13 @@ def drive(
     config: dict,
     answer: Callable[[dict], Any],
     on_state: Callable[[Mapping], None] | None = None,
+    busy: Callable[[], AbstractContextManager] | None = None,
 ) -> dict:
     """Run `graph` until it finishes, answering every interrupt with `answer(payload)`.
 
     A thread that already has a pending interrupt (a resumed session) is answered first.
     `on_state` sees the checkpointed state just before each answer is requested.
+    `busy` makes a context manager (a spinner) held open only while the graph itself runs.
     """
 
     def snapshot() -> None:
@@ -39,7 +42,8 @@ def drive(
     result: dict = {}
     while True:
         try:
-            result = graph.invoke(pending if pending is not None else initial, config)
+            with (busy or nullcontext)():
+                result = graph.invoke(pending if pending is not None else initial, config)
         except GraphInterrupt as exc:
             # Older LangGraph raises on interrupt; 1.x returns instead.
             interrupts = getattr(exc, "interrupts", [])

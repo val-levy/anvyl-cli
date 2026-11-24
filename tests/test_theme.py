@@ -1,4 +1,4 @@
-from anvyl.cli import bar, light_terminal
+from anvyl.theme import bar_text, light_terminal
 
 
 def test_light_terminal_detection():
@@ -9,11 +9,11 @@ def test_light_terminal_detection():
 
 
 def test_bar_blocks():
-    out = bar(50, width=10)
+    out = bar_text(50, width=10).plain
     assert out.count("█") == 5 and out.count("░") == 5 and out.endswith("50%")
 
 
 def test_spin_word():
-    from anvyl.cli import SPIN_WORDS, spin_word
+    from anvyl.theme import SPIN_WORDS, spin_word
 
     assert len(set(SPIN_WORDS)) == len(SPIN_WORDS) and spin_word().endswith("...")

@@ -17,7 +17,9 @@ file under <data>/threads/ is 7 days old.
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
+import sys
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
@@ -27,8 +29,10 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
 
-from . import guard
+from . import guard, tui
 from .auth import get_api_key
 from .changes import clear_snapshot
 from .driver import drive
@@ -38,6 +42,7 @@ from .llm import ModelClient, ModelError, OpenRouterClient
 from .policy import REAL_MAX_LEVEL, clamp_real_level
 from .profile import FolderConfig, Profile, effective_profile
 from .real_coach import RealCoach
+from .registry import PluginRegistry, SkillRegistry
 from .state import initial_real_state
 from .storage import (
     checkpoints_path,
@@ -46,6 +51,18 @@ from .storage import (
     sessions_dir,
     work_dir_for,
 )
+from .theme import (
+    ACCENT,
+    COACH,
+    MUTED,
+    RED,
+    animate,
+    banner,
+    bar_text,
+    busy,
+    intro,
+    typewrite,
+)
 
 LOGIN_HINT = 'not logged in: run "anvyl login"'
 TICKET_ONLY = (
@@ -53,11 +70,7 @@ TICKET_ONLY = (
 )
 RAIL_MIN_WIDTH = 110
 STALE_DAYS = 7
-HELP = (
-    "/mode ship|learn  /level 0-2  /profile professional|personal  /keepdiffs on|off\n"
-    "/status  /score  /graph  /rail  /help  /quit\n"
-    "at a work prompt: /done when finished, /hint for the coach"
-)
+HELP = "\n".join(f"{c:<11}{d}" for c, d in tui.COMMANDS.items())
 PERSONAL_NOTICE = (
     "notice (personal profile): the model may read non-secret files in this folder. "
     "With /keepdiffs on, diffs of your changes are kept in your anvyl data dir. "
@@ -149,11 +162,21 @@ class Session:
         self.view: Mapping[str, Any] = {}
         self.score_lines: list[str] = []
         self.saver: SqliteSaver | None = None
+        self.t0 = time.monotonic()
+        self.plugins = PluginRegistry(data_dir / "plugins")
+        self.skills = SkillRegistry(data_dir / "skills")
 
     # -- io --------------------------------------------------------------------
-    def say(self, text: object) -> None:
+    def say(self, text: object, style: str | None = None, wrap: bool = False) -> None:
+        """`style` colours Anvyl's own lines only; markup stays off so text is never parsed.
+        `wrap` breaks prose at word boundaries instead of leaving it to the terminal."""
         self.console.print(
-            _clean(str(text), 4000), markup=False, highlight=False, emoji=False, soft_wrap=True
+            _clean(str(text), 4000),
+            style=style,
+            markup=False,
+            highlight=False,
+            emoji=False,
+            soft_wrap=not wrap,
         )
 
     def ask(self, prompt: str, graph_prompt: bool = False) -> str:
@@ -175,7 +198,9 @@ class Session:
         if profile is None:
             self.say(
                 f"First time in {self.root}. Is this a work project (professional, the default) "
-                "or a personal one?"
+                "or a personal one?",
+                COACH,
+                wrap=True,
             )
             while profile is None:
                 choice = self.ask("[professional/personal] ").lower()
@@ -194,29 +219,49 @@ class Session:
         if profile is Profile.PERSONAL:
             self.can_read = True
             if not self.cfg.personal_notice_seen():
-                self.say(PERSONAL_NOTICE)
+                self.say(PERSONAL_NOTICE, MUTED, wrap=True)
                 self.cfg.mark_personal_notice_seen()
             return
         if not self.cfg.consent_asked(self.root):
             self.say(
                 f"Let the model read files in {self.root}? Secrets are redacted and denied "
-                "files are never sent. Default is no."
+                "files are never sent. Default is no.",
+                COACH,
+                wrap=True,
             )
             self.cfg.set_consent(self.root, self.ask("[y/N] ").lower() in ("y", "yes"))
         self.can_read = self.cfg.consented(self.root)
         if not self.can_read:
-            self.say(TICKET_ONLY)
+            self.say(TICKET_ONLY, MUTED, wrap=True)
 
     # -- slash commands (human-typed only) -------------------------------------
     def command(self, line: str) -> None:
         cmd, *args = line.split()
         cmd, arg = cmd.lower(), (args[0].lower() if args else "")
-        if cmd == "/quit":
+        if cmd in ("/quit", "/exit", "/q"):
             raise _Quit
         if cmd == "/help":
             self.say(HELP)
         elif cmd == "/status":
             self.status()
+        elif cmd == "/usage":
+            files, tokens = self.stats()
+            mins = (time.monotonic() - self.t0) / 60
+            self.say(
+                f"session {mins:.0f} min | tokens {tokens} | files sent {files} | "
+                f"L{self.level} | mode {self.mode}",
+                MUTED,
+            )
+        elif cmd == "/clear":
+            ui = getattr(self.console, "ui", None)
+            if ui:
+                ui.clear()
+            else:
+                self.console.clear()
+        elif cmd == "/plugin":
+            self.registry_cmd("plugin", self.plugins, args)
+        elif cmd == "/skill":
+            self.registry_cmd("skill", self.skills, args)
         elif cmd == "/score":
             self.say("\n".join(self.score_lines) or "no scorecard yet")
         elif cmd == "/graph":
@@ -259,6 +304,28 @@ class Session:
         else:
             self.say(f"unknown command {cmd} (try /help)")
 
+    def registry_cmd(self, kind: str, reg: PluginRegistry | SkillRegistry, args: list[str]) -> None:
+        """/plugin and /skill list|load|unload <id>. Ids must be known ones; plugin loads go
+        through policy.plugin_allowed. Loading records intent only: nothing is sent to the model."""
+        sub, ident = (args[0].lower() if args else "list"), (args[1] if len(args) > 1 else "")
+        known = {x["id"]: x for x in reg.list()}
+        if sub == "list":
+            for i, x in known.items():
+                desc = _clean(str(x.get("description", "")), 80)
+                self.say(f"[{'x' if x['loaded'] else ' '}] {i} {desc}".rstrip())
+            if not known:
+                self.say(f"no {kind}s in {reg.dir}", MUTED)
+        elif sub in ("load", "unload") and ident in known:
+            if isinstance(reg, PluginRegistry) and sub == "load":
+                state = {**self.view, "mode": self.mode, "level": self.level}
+                self.say(reg.load(ident, state)[1])
+            else:
+                self.say(getattr(reg, sub)(ident)[1])
+        elif sub in ("load", "unload"):
+            self.say(f"no {kind} {_clean(ident, 40)!r} (try /{kind} list)")
+        else:
+            self.say(f"usage: /{kind} list|load|unload <id>")
+
     # -- rendering -------------------------------------------------------------
     def stats(self) -> tuple[int, int]:
         return len(self.view.get("files_read") or []), int(self.view.get("tokens", 0))
@@ -275,12 +342,14 @@ class Session:
                 f"| profile    {self.profile.value}\n"
                 f"| gate       {gate}\n"
                 f"| files sent {files}\n"
-                f"| tokens     {tokens}"
+                f"| tokens     {tokens}",
+                MUTED,
             )
         else:
             self.say(
                 f"step {v.get('current_node', '-')} | L{level} | mode {v.get('mode', self.mode)} | "
-                f"{self.profile.value} | gate {gate} | files sent {files} | tokens {tokens}"
+                f"{self.profile.value} | gate {gate} | files sent {files} | tokens {tokens}",
+                MUTED,
             )
 
     def scorecard(self, st: Mapping[str, Any]) -> list[str]:
@@ -311,10 +380,12 @@ class Session:
     def answer(self, payload: dict) -> str:
         kind = payload.get("kind")
         if kind == "coach_next":
-            self.say("coach: " + str(payload.get("text", "")))
+            label = "● " if self.console.is_terminal else "coach: "
+            self.console.print(label, style=COACH, end="", markup=False, highlight=False)
+            typewrite(self.console, _clean(str(payload.get("text", "")), 4000))
         elif kind == "error":
-            self.say(payload.get("message", ""))
-        self.say(payload.get("prompt", ""))
+            self.say(payload.get("message", ""), RED)
+        self.say(payload.get("prompt", ""), COACH)
         return self.ask("> ", graph_prompt=True)
 
     def run_ticket(self, ticket: str) -> None:
@@ -341,14 +412,17 @@ class Session:
                 str(work),
             )  # fmt: skip
             self.view = state0
-            self.status()
+            if not self.console.is_terminal:  # the TUI status bar already shows this
+                self.status()
             config = {"configurable": {"thread_id": sid}}
-            drive(graph, state0, config, self.answer, self.on_state)
+            drive(
+                graph, state0, config, self.answer, self.on_state, busy=lambda: busy(self.console)
+            )
             self.finish(graph.get_state(config).values)
         except (_Quit, KeyboardInterrupt):
             raise
         except Exception as exc:  # type name only: messages can echo ticket or file text
-            self.say(f"error: the ticket failed ({type(exc).__name__}); nothing was scored")
+            self.say(f"error: the ticket failed ({type(exc).__name__}); nothing was scored", RED)
         finally:
             self.view = {}
             clear_snapshot(work)
@@ -357,15 +431,36 @@ class Session:
     def on_state(self, values: Mapping[str, Any]) -> None:
         self.view = dict(values)
 
+    def show_score(self, st: Mapping[str, Any]) -> None:
+        if not self.console.is_terminal:
+            self.say("\n".join(self.score_lines))
+            return
+        own = float(st.get("ownership_score", 0)) * 100 if st.get("questions") else None
+
+        def panel(fill: float) -> Panel:
+            body = Text()  # Text never parses markup; the lines are numbers and enums anyway
+            for i, line in enumerate(self.score_lines[1:]):  # "scorecard" is the panel title
+                body.append("\n" if i else "")
+                if own is not None and line.startswith("  ownership"):
+                    body.append("  ownership   ")
+                    body.append_text(bar_text(own * fill))
+                else:
+                    body.append(line)
+            return Panel(body, title="scorecard", border_style=ACCENT, expand=False)
+
+        animate(self.console, panel)
+
     def finish(self, st: Mapping[str, Any]) -> None:
         self.view = st
         if st.get("quit"):
             self.say("session ended: nothing scored")
         elif st.get("gate_blocked") and not st.get("gate_passed"):
-            self.say("[locked] attempt gate blocked: no usable human attempt. Nothing was scored.")
+            self.say(
+                "[locked] attempt gate blocked: no usable human attempt. Nothing was scored.", RED
+            )
         else:
             self.score_lines = self.scorecard(st)
-            self.say("\n".join(self.score_lines))
+            self.show_score(st)
             if st.get("current_node") == "scorecard":
                 self.level = clamp_real_level(int(st.get("level", self.level)))
 
@@ -375,31 +470,50 @@ def run_session(
     data_dir: Path,
     console: Console,
     client: ModelClient | None,
-    read_line: Callable[[str], str | None] = _input,
+    read_line: Callable[[str], str | None] | None = None,
 ) -> int:
     data_dir = ensure_data_dir(data_dir)
     cleanup_stale_work(data_dir)
-    s = Session(root, data_dir, console, client, read_line)
+    s = Session(root, data_dir, console, client, read_line or _input)
+    interactive = read_line is None and console.is_terminal and sys.stdin.isatty()
+    fullscreen = interactive and not os.environ.get("ANVYL_INLINE")
+    if interactive and not fullscreen:
+        s.read_line = tui.reader(s)
     if client is None:
         key = get_api_key(data_dir)
         if not key:
-            s.say(LOGIN_HINT)
+            s.say(LOGIN_HINT, RED)
             return 1
         s.client = OpenRouterClient(key)
-    try:
-        with open_checkpointer(data_dir) as saver:
-            s.saver = saver
-            _purge_stale_threads(saver, data_dir)
-            s.say(f"anvyl  |  {s.root.name}  |  /help for commands")
-            s.setup_folder()
-            while True:
-                if ticket := s.ask("ticket> "):
-                    s.run_ticket(ticket)
-    except _Quit:
-        return 0
-    except KeyboardInterrupt:
-        s.say("interrupted")
-        return 130
+
+    def loop() -> int:
+        try:
+            with open_checkpointer(data_dir) as saver:
+                s.saver = saver
+                _purge_stale_threads(saver, data_dir)
+                if fullscreen:
+                    pass  # the empty transcript shows the animated welcome screen
+                elif console.is_terminal:
+                    intro(console)
+                    tui.dock(console, banner(s.root))
+                else:
+                    s.say(f"anvyl  |  {s.root.name}  |  /help for commands", ACCENT)
+                s.setup_folder()
+                while True:
+                    if ticket := s.ask("ticket> "):
+                        s.run_ticket(ticket)
+        except _Quit:
+            return 0
+        except KeyboardInterrupt:
+            s.say("interrupted")
+            return 130
+
+    if fullscreen:
+        from .fullscreen import FullScreen
+
+        intro(console)
+        return FullScreen(s).run(loop)
+    return loop()
 
 
 def preview(

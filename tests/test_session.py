@@ -291,7 +291,7 @@ def test_model_text_is_never_parsed_as_commands_and_prints_as_plain_text(tmp_pat
         root, data, ["Add retry", ATTEMPT, "/status", "/quit"], client=client, force_terminal=True
     )
     assert "[bold red]x[/]" in r.out and ":smile:" in r.out
-    assert "\x1b" not in r.out and "\x07" not in r.out
+    assert "\x1b[31m" not in r.out and "\x1b]0;" not in r.out and "\x07" not in r.out
     assert FolderConfig(data).profile(root) is Profile.PROFESSIONAL
     assert "files sent" in r.out, "the session kept running after the model said /quit"
 
@@ -299,7 +299,7 @@ def test_model_text_is_never_parsed_as_commands_and_prints_as_plain_text(tmp_pat
 def test_human_typed_text_echoed_back_is_plain_too(tmp_path):
     root, data = prep(tmp_path)
     r = go(root, data, ["/[link=http://evil]x[/link]", "/quit"], force_terminal=True)
-    assert "unknown command /[link=http://evil]x[/link]" in r.out and "\x1b" not in r.out
+    assert "unknown command /[link=http://evil]x[/link]" in r.out and "\x1b]8" not in r.out
 
 
 def test_eof_mid_ticket_quits_cleanly_and_cleans_up(tmp_path):
@@ -432,7 +432,7 @@ def test_preview_makes_no_model_call_and_redacts(tmp_path):
     preview(root, data, Console(file=buf, width=100, force_terminal=True), ticket, client)
     out = buf.getvalue()
     assert client.calls == []
-    assert "fix login" in out and "[red]now[/red]" in out and "\x1b" not in out
+    assert "fix login" in out and "[red]now[/red]" in out and "\x1b[31m" not in out
     assert "AKIAIOSFODNN7EXAMPLE" not in out and "ghp_aaaa" not in out
 
 
@@ -500,3 +500,13 @@ def test_failed_delete_keeps_marker_so_a_later_purge_removes_the_thread(tmp_path
     os.utime(marks[0], (old, old))
     go(root, data, [])
     assert not marks[0].exists() and thread_rows(data) == 0
+
+
+def test_usage_clear_plugin_skill_exit(tmp_path):
+    root, data = prep(tmp_path)
+    (data / "skills" / "s1").mkdir(parents=True)
+    (data / "skills" / "s1" / "SKILL.md").write_text("x")
+    cmds = ["/usage", "/skill load s1", "/skill load ../x", "/skill list", "/plugin list"]
+    r = go(root, data, [*cmds, "/clear", "/exit"])
+    assert r.rc == 0 and "tokens 0" in r.out and "loaded skill s1" in r.out
+    assert "no skill" in r.out and "[x] s1" in r.out

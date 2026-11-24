@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import os
-import random
 import shutil
 import sys
 import time
@@ -32,7 +30,6 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
-from rich.live import Live
 from rich.panel import Panel
 
 from . import auth, tasks
@@ -51,87 +48,9 @@ from .storage import (
     save_session,
     sessions_dir,
 )
-
-
-def light_terminal(env: Mapping[str, str] | None = None) -> bool:
-    """True if COLORFGBG ("fg;bg") reports a light background; dark otherwise."""
-    value = (os.environ if env is None else env).get("COLORFGBG", "")
-    return value.rsplit(";", 1)[-1] in {"7", "15"}
-
-
-# Palette (Mistral brand): amber accent, orange coach, red only for locked/errors.
-# Dark is the default; the light variant is darkened so it stays readable on white.
-if light_terminal():
-    ACCENT, COACH, MUTED, RED = "#b86e00", "#c25a00", "#71717b", "#c20f00"
-else:
-    ACCENT, COACH, MUTED, RED = "#ffaf01", "#ff8204", "#a0a0a8", "#e51300"
+from .theme import ACCENT, COACH, MUTED, RED, animate, bar, busy, typewrite
 
 MIN_RAIL_WIDTH = 110
-FILL_FRAMES = 12
-SPIN_WORDS = (
-    "Vibing",
-    "Subliminating",
-    "Noodling",
-    "Percolating",
-    "Cogitating",
-    "Marinating",
-    "Discombobulating",
-    "Flibbertigibbeting",
-    "Reticulating",
-    "Combobulating",
-    "Pondering",
-    "Ruminating",
-    "Simmering",
-    "Brewing",
-    "Conjuring",
-    "Spelunking",
-    "Wibbling",
-    "Moseying",
-    "Finagling",
-    "Tinkering",
-    "Puttering",
-    "Smooshing",
-    "Schlepping",
-    "Wrangling",
-    "Musing",
-    "Concocting",
-    "Cerebrating",
-    "Incubating",
-    "Germinating",
-    "Transmuting",
-    "Unfurling",
-    "Frolicking",
-    "Sussing",
-    "Mulling",
-    "Churning",
-    "Whirring",
-    "Shimmying",
-    "Pontificating",
-)
-TYPE_MAX_S = 1.0  # typewriter never delays a reply by more than this
-
-
-def bar(pct: float, width: int = 20) -> str:
-    pct = max(0.0, min(100.0, pct))
-    filled = int(round(pct / 100 * width))
-    done, todo = "█" * filled, "░" * (width - filled)
-    return f"[{ACCENT}]{done}[/{ACCENT}][{MUTED}]{todo}[/{MUTED}] {pct:.0f}%"
-
-
-def spin_word() -> str:
-    return random.choice(SPIN_WORDS) + "..."
-
-
-def typewrite(console: Console, text: str) -> None:
-    """Print text char by char on a terminal (<= TYPE_MAX_S total), else all at once."""
-    if not console.is_terminal:
-        console.print(text)
-        return
-    delay = min(0.02, TYPE_MAX_S / max(len(text), 1))
-    for ch in text:
-        console.print(ch, end="", markup=False, highlight=False)
-        time.sleep(delay)
-    console.print()
 
 
 def fmt_secs(seconds: float) -> str:
@@ -304,15 +223,7 @@ class Runner:
         )
 
     def render_scorecard(self, state: Mapping[str, Any]) -> None:
-        if not self.console.is_terminal:
-            self.console.print(self._scorecard_panel(state, 1.0))
-            return
-        with Live(
-            self._scorecard_panel(state, 0.0), console=self.console, auto_refresh=False
-        ) as live:
-            for step in range(1, FILL_FRAMES + 1):
-                time.sleep(0.04)
-                live.update(self._scorecard_panel(state, step / FILL_FRAMES), refresh=True)
+        animate(self.console, lambda fill: self._scorecard_panel(state, fill))
 
     def _scorecard_panel(self, state: Mapping[str, Any], fill: float) -> Panel:
         total = int(state.get("human_lines", 0)) + int(state.get("ai_lines", 0))
@@ -440,26 +351,17 @@ class Runner:
             else:
                 self.render_ministrip(initial)
 
-            # Spinner runs only while the graph/model works, never while waiting on input.
-            spin = self.console.status(spin_word(), spinner="dots", spinner_style=ACCENT)
-
             def on_state(values: Mapping[str, Any]) -> None:
-                spin.stop()
                 self._state_view = dict(values)
 
-            def answer(payload: dict) -> str:
-                spin.stop()
-                try:
-                    return self.provider.answer(payload, self)
-                finally:
-                    spin.update(spin_word())
-                    spin.start()
-
-            spin.start()
-            try:
-                result = drive(self.graph, initial, self.config, answer, on_state)
-            finally:
-                spin.stop()
+            result = drive(
+                self.graph,
+                initial,
+                self.config,
+                lambda payload: self.provider.answer(payload, self),
+                on_state,
+                busy=lambda: busy(self.console),
+            )
             self._state_view = result
             save_session(result, sessions_dir(self.data_dir))
             if result.get("gate_blocked") and not result.get("gate_passed"):
