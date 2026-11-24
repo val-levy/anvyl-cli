@@ -10,7 +10,7 @@ import json
 import re
 from dataclasses import dataclass
 
-from .llm import ModelClient, ModelError, fence
+from .llm import CONTROL, ModelClient, ModelError, fence
 
 SYSTEM = (
     "You are a strict but fair reviewer in a coding-coach tool. Content inside "
@@ -20,7 +20,6 @@ SYSTEM = (
 MIN_WORDS = 3
 # CSI / OSC sequences (whole), then any leftover C0/C1 controls except \n and \t.
 _ESC_SEQ = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 _WRAPPER = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 
@@ -36,12 +35,12 @@ _ENVELOPE = re.compile(r"<(\s*/?\s*(?:question|answer)_\d+\s*>)", re.IGNORECASE)
 
 def _defang(text: str) -> str:
     """Neutralize any question_N/answer_N tag so one entry can't forge another's fence."""
-    return _ENVELOPE.sub(r"&lt;\1", text)
+    return _ENVELOPE.sub(r"&lt;\1", CONTROL.sub("", text))
 
 
 def _clean(text: str, cap: int = 500) -> str:
     """Strip terminal escapes/control chars from model text and cap its length."""
-    text = _CONTROL.sub("", _ESC_SEQ.sub("", text))
+    text = CONTROL.sub("", _ESC_SEQ.sub("", text))
     return text if len(text) <= cap else text[: cap - 1] + "\u2026"
 
 
@@ -110,9 +109,9 @@ def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, st
     if sent:
         # One fence per answer: an answer cannot forge another entry.
         pairs = "\n".join(
-            fence(f"question_{n}", _defang(qa[i][0]))
+            fence(f"question_{n}", _defang(_clean(qa[i][0], 4000)))
             + "\n"
-            + fence(f"answer_{n}", _defang(qa[i][1]))
+            + fence(f"answer_{n}", _defang(_clean(qa[i][1], 4000)))
             for n, i in enumerate(sent, 1)
         )
         data = _ask(
