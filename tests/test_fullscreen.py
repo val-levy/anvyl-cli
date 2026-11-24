@@ -75,3 +75,13 @@ def test_input_stays_pinned_to_the_bottom_and_reflows_on_resize():
     assert len(after) == 10 and after[-3].startswith("❯") and "mode learn" in after[-1]
     assert any("❯ fix it" in row for row in after) and any("after" in row for row in after)
     assert max(len(r) for r in after) <= 30
+
+
+def test_queue_feeds_chat_prompts_only_and_echo_is_a_band():
+    ui = FullScreen(SimpleNamespace(root="/x", view={}, stats=lambda: (0, 0)))
+    ui.width = 20
+    ui.pending += ["first", "second"]
+    assert ui.read("ticket> ") == "first" and ui.pending == ["second"]
+    assert "\x1b[48;2;43;45;49m" in ui.raw  # the dark band behind your message
+    ui.q.put("y")  # a non-chat prompt ignores the queue and waits for fresh input
+    assert ui.read("[y/N] ") == "y" and ui.pending == ["second"]

@@ -68,6 +68,7 @@ STYLE = Style.from_dict(
         "rule": MUTED,
         "prompt": f"bold {COACH}",
         "bar": MUTED,
+        "queued": f"{MUTED} italic",
         "bar.key": ACCENT,
         "spin.glyph": ACCENT,
         "spin.word": COACH,

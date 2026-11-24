@@ -31,8 +31,10 @@ def light_terminal(env: Mapping[str, str] | None = None) -> bool:
 # Dark is the default; the light variant is darkened so it stays readable on white.
 if light_terminal():
     ACCENT, COACH, MUTED, RED = "#b86e00", "#c25a00", "#71717b", "#c20f00"
+    USER_BG = "#e9e9ec"  # your own messages sit on a slightly darker band than the page
 else:
     ACCENT, COACH, MUTED, RED = "#ffaf01", "#ff8204", "#a0a0a8", "#e51300"
+    USER_BG = "#2b2d31"
 
 FILL_FRAMES = 12
 SPIN_WORDS = (

@@ -40,7 +40,7 @@ from rich.console import Console, ConsoleDimensions
 from rich.text import Text
 
 from .grader import _clean
-from .theme import ACCENT, COACH, GLYPHS, MUTED, RED, SPIN_WORDS, _grid, _lerp
+from .theme import ACCENT, COACH, GLYPHS, MUTED, RED, SPIN_WORDS, USER_BG, _grid, _lerp
 from .tui import STYLE, SlashCompleter, status_fragments
 
 Frag = tuple[str, str]
@@ -211,6 +211,7 @@ class FullScreen:
         self.interrupted = False
         self.busy_since: float | None = None
         self.q: queue.Queue[str | None] = queue.Queue()
+        self.pending: list[str] = []
         self.words = list(SPIN_WORDS)
         self.transcript = _Transcript(self)
         self.input = Buffer(
@@ -301,25 +302,39 @@ class FullScreen:
 
     # -- input side ---------------------------------------------------------------
     def read(self, prompt: str) -> str | None:
-        self.label = "❯ " if prompt in ("ticket> ", "> ") else prompt
+        chat = prompt in ("ticket> ", "> ")
+        self.label = "❯ " if chat else prompt
+        if chat and self.pending:  # typed while the agent worked: send it now
+            text = self.pending.pop(0)
+            self._echo(text)
+            return text
         self.reading = True
         self._redraw()
         item = self.q.get()
         self.reading = False
         return item
 
+    def _echo(self, text: str) -> None:
+        """Your message in the transcript: a full-width band, darker than the page."""
+        self.console.print()
+        for i, ln in enumerate(_clean(text, 4000).splitlines() or [""]):
+            row = Text.assemble(("❯ " if i == 0 else "  ", f"bold {COACH}"), ln)
+            row.pad_right(max(0, self.width - row.cell_len))
+            self.console.print(row, style=f"on {USER_BG}", soft_wrap=True, highlight=False)
+        self.transcript.pin = None
+
     def _submit(self) -> None:
-        if not self.reading:
-            return  # the agent is working: keep what was typed, don't answer a later prompt
         text = self.input.text
+        if not text.strip():
+            return
         self.input.append_to_history()
         self.input.reset()
+        if not self.reading:
+            self.pending.append(text)  # queued: shown dimmed, sent at the next chat prompt
+            self._redraw()
+            return
         self.reading = False
-        shown = "\n  ".join(_clean(text, 4000).splitlines() or [""])
-        self.console.print(
-            Text.assemble((self.label, f"bold {COACH}"), shown), soft_wrap=True, highlight=False
-        )
-        self.transcript.pin = None
+        self._echo(text)
         self.q.put(text)
 
     # -- layout ---------------------------------------------------------------------
@@ -334,6 +349,10 @@ class FullScreen:
                 ("class:spin.time", f"({int(el)}s)"),
             ]
         )
+
+    def _queued(self) -> FormattedText:
+        rows = [(" ❯ " + " ".join(t.split())[:200] + "\n") for t in self.pending[-3:]]
+        return FormattedText([("class:queued", "".join(rows).rstrip("\n"))])
 
     def _build(self, input: Any, output: Any) -> Application[None]:
         tr = self.transcript
@@ -357,6 +376,11 @@ class FullScreen:
             [
                 tr.window,
                 Window(FormattedTextControl(self._spinner), height=1),
+                Window(
+                    FormattedTextControl(self._queued),
+                    height=lambda: min(len(self.pending), 3),
+                    style="class:queued",
+                ),
                 rule(),
                 VSplit([tag, input_win]),
                 rule(),

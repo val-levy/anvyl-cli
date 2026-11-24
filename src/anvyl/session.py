@@ -75,6 +75,11 @@ TICKET_ONLY = (
 RAIL_MIN_WIDTH = 110
 STALE_DAYS = 7
 HELP = "\n".join(f"{c:<11}{d}" for c, d in tui.COMMANDS.items())
+HOWTO = (
+    "How this works: tell me one task you want to do in this folder, e.g. "
+    "'add retry to fetch'. This is not a chat: I ask for your plan first, coach you, and the "
+    "AI only helps once you have tried. Type /help for commands."
+)
 PERSONAL_NOTICE = (
     "notice (personal profile): the model may read non-secret files in this folder. "
     "With /keepdiffs on, diffs of your changes are kept in your anvyl data dir. "
@@ -566,8 +571,15 @@ def run_session(
                 else:
                     s.say(f"anvyl  |  {s.root.name}  |  /help for commands", ACCENT)
                 s.setup_folder()
+                s.say(HOWTO, MUTED, wrap=True)
                 while True:
                     if ticket := s.ask("ticket> "):
+                        s.say(
+                            "Step 1: write your plan in a sentence or two (it can be wrong). "
+                            "The coach reacts, then you write the code yourself, then /done.",
+                            MUTED,
+                            wrap=True,
+                        )
                         s.run_ticket(ticket)
         except _Quit:
             return 0
