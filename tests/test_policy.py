@@ -120,3 +120,49 @@ def test_explainback_required_rules():
     assert policy.explainback_required(_state(mode="learn")) is True
     assert policy.explainback_required(_state(mode="ship")) is False
     assert policy.explainback_required(_state(mode="ship", high_stakes=True)) is True
+
+
+# -- real-ticket attempt floor, triage, level clamp ------------------------------
+def test_attempt_floor_rejects_junk():
+    for junk in ("asdf asdf asdf asdf asdf", "idk", "", "   ", None):
+        ok, reason = policy.attempt_floor(junk)  # type: ignore[arg-type]
+        assert ok is False
+        assert reason
+
+
+def test_attempt_floor_rejects_copy_of_ticket():
+    ticket = "Retry failed API calls with exponential backoff"
+    ok, _ = policy.attempt_floor("retry failed api calls with exponential backoff.", ticket)
+    assert ok is False
+    ok, _ = policy.attempt_floor(f"Plan: {ticket} and then stop", ticket)
+    assert ok is False
+
+
+def test_attempt_floor_accepts_wrong_but_real_plan():
+    ticket = "Retry failed API calls with exponential backoff"
+    plan = "I would wrap the call in a loop and wait a fixed second between three tries"
+    assert policy.attempt_floor(plan, ticket) == (True, "ok")
+
+
+def test_high_stakes_from_ticket_words():
+    assert policy.high_stakes("Fix the LOGIN redirect", []) is True
+    assert policy.high_stakes("rotate API tokens", []) is True
+    assert policy.high_stakes("Fix authentication bug", []) is True
+    assert policy.high_stakes(None, []) is False  # type: ignore[arg-type]
+
+
+def test_high_stakes_from_paths():
+    assert policy.high_stakes("tidy", ["src/auth/session.py"]) is True
+    assert policy.high_stakes("tidy", ["app\\billing\\x.py"]) is True
+    assert policy.high_stakes("tidy", ["db/migrations/001.sql"]) is True
+    assert policy.high_stakes("tidy", ["src/security.py"]) is True
+    assert policy.high_stakes("tidy", ["src/author.py", "docs/payments_faq.md"]) is False
+
+
+def test_routine_ticket_not_high_stakes():
+    assert policy.high_stakes("add a unit test for the parser", ["src/parser.py"]) is False
+    assert policy.high_stakes("", []) is False
+
+
+def test_clamp_real_level():
+    assert [policy.clamp_real_level(n) for n in (-3, 0, 1, 2, 3, 4, 99)] == [0, 0, 1, 2, 2, 2, 2]

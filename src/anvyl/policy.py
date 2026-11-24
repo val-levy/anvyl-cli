@@ -10,6 +10,8 @@ reliably, so the gate lives in code, not in a system prompt.
 
 from __future__ import annotations
 
+import re
+
 from .judge import CODE_FENCE_RE, CODE_LINE_RE
 
 # A human attempt must be a real try, not "idk" or an empty string.
@@ -114,3 +116,52 @@ def explainback_required(state: dict) -> bool:
     if state.get("mode") == "learn":
         return True
     return bool(state.get("high_stakes"))
+
+
+# -- real tickets (not the tutorial) -----------------------------------------
+REAL_MAX_LEVEL = 2
+MIN_DISTINCT_WORDS = 4
+MAX_WORD_SHARE = 0.6
+MIN_CONTAINMENT_WORDS = 3
+
+_WORD_RE = re.compile(r"\w+")
+_HIGH_STAKES_RE = re.compile(
+    r"\b(?:auth(?:enticat\w*|oriz\w*)?|login|password|token|payment|billing|invoice|"
+    r"migration|schema|encrypt\w*|secret|permission|security)s?\b",
+    re.IGNORECASE,
+)
+_HIGH_STAKES_PATHS = {"auth", "payment", "billing", "migrations", "security", "secrets"}
+
+
+def clamp_real_level(level: int) -> int:
+    """Real sessions never reach L3/L4."""
+    return min(max(level, 0), REAL_MAX_LEVEL)
+
+
+def attempt_floor(attempt: str | None, ticket: str | None = "") -> tuple[bool, str]:
+    """Stronger attempt gate for real tickets. Returns (ok, reason)."""
+    text = (attempt or "").strip()
+    if len(text) < MIN_ATTEMPT_CHARS or len(text.split()) < MIN_ATTEMPT_WORDS:
+        return False, "Write a real plan first: a sentence or two on how you would approach it."
+    words = _WORD_RE.findall(text.lower())
+    if len(set(words)) < MIN_DISTINCT_WORDS:
+        return False, "That repeats the same few words. Say how you would actually do it."
+    if max(words.count(w) for w in set(words)) / len(words) > MAX_WORD_SHARE:
+        return False, "One word makes up most of that. Describe your approach in your own words."
+    ticket_words = _WORD_RE.findall((ticket or "").lower())
+    if ticket_words and min(len(words), len(ticket_words)) >= MIN_CONTAINMENT_WORDS:
+        a, t = f" {' '.join(words)} ", f" {' '.join(ticket_words)} "
+        if a in t or t in a:
+            return False, "That is the ticket restated. Say how you would approach it."
+    return True, "ok"
+
+
+def high_stakes(ticket: str | None, paths: list[str]) -> bool:
+    """Triage: does this ticket or the files it touches look security/money/data-critical?"""
+    if _HIGH_STAKES_RE.search(ticket or ""):
+        return True
+    for path in paths:
+        for seg in re.split(r"[/\\]", path.lower()):
+            if seg in _HIGH_STAKES_PATHS or seg.rpartition(".")[0] in _HIGH_STAKES_PATHS:
+                return True
+    return False
