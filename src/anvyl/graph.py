@@ -636,11 +636,12 @@ def build_real_graph(
             "events": events,
         }
         if keep_diffs:
-            save_diff(sessions_dir, str(state.get("session_id")), diff_text())
+            save_diff(sessions_dir, str(state.get("session_id")), red(diff_text()))
         changes_mod.clear_snapshot(work_dir)
-        save_session(
-            {**state, **out, "events": list(state.get("events", [])) + events}, sessions_dir
-        )
+        record = {**state, **out, "events": list(state.get("events", [])) + events}
+        if not state.get("questions"):
+            record["ownership_score"] = None  # skipped explain-back is "not scored", not 0%
+        save_session(record, sessions_dir)
         return Command(goto=END, update=out)
 
     for name, fn in [

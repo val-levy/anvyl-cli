@@ -108,6 +108,8 @@ def test_abandon_skips_explain_back(tmp_path):
     run = run_real(tmp_path, client, answers(work="/done", nochange="abandon"), level=2)
     assert "explain" not in kinds(run)
     assert run.state["current_node"] == "scorecard" and run.state["level"] == 2
+    saved = json.loads((run.sessions / "real-test.json").read_text())
+    assert saved["ownership_score"] is None
     assert (run.sessions / "real-test.json").exists()
 
 

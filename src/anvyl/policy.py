@@ -141,7 +141,7 @@ def clamp_real_level(level: int) -> int:
 def attempt_floor(attempt: str | None, ticket: str | None = "") -> tuple[bool, str]:
     """Stronger attempt gate for real tickets. Returns (ok, reason)."""
     text = (attempt or "").strip()
-    if len(text) < MIN_ATTEMPT_CHARS or len(text.split()) < MIN_ATTEMPT_WORDS:
+    if not gate_passed({"mode": "learn", "human_attempt": text}):
         return False, "Write a real plan first: a sentence or two on how you would approach it."
     words = _WORD_RE.findall(text.lower())
     if len(set(words)) < MIN_DISTINCT_WORDS:

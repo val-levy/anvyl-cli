@@ -195,11 +195,11 @@ def test_model_reply_is_sanitized_and_capped(tmp_path: Path):
 
 
 def test_build_messages_matches_what_is_sent(tmp_path: Path):
-    c, client = coach(tmp_path, [ChatResult("ok")], skills_text="SKILLTEXT")
+    c, client = coach(tmp_path, [ChatResult("ok")])
     c.reply(STATE)
     assert c.build_messages(STATE) == client.calls[0][0]
     flat = json.dumps(c.build_messages(STATE))
-    assert "SKILLTEXT" in flat and "<ticket>" in flat and "<attempt>" in flat
+    assert "<ticket>" in flat and "<attempt>" in flat
 
 
 def test_model_error_propagates(tmp_path: Path):

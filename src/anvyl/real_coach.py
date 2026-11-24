@@ -68,13 +68,11 @@ class RealCoach:
         root: Path,
         profile: Profile,
         can_read_files: bool,
-        skills_text: str = "",
     ):
         self.client = client
         self.root = root
         self.profile = profile
         self.can_read_files = can_read_files
-        self.skills_text = skills_text
         self.files_read: list[str] = []
 
     # -- messages ----------------------------------------------------------
@@ -86,8 +84,6 @@ class RealCoach:
         system = SYSTEM + (
             "" if self.can_read_files else " You have no file access in this session."
         )
-        if self.skills_text:
-            system += "\n\n" + self.skills_text
         user = (
             f"Level: L{level}. Help rung: {rung} of {policy.MAX_RUNG} "
             "(0 = ask a question, higher = more specific hint).\n"

@@ -122,3 +122,10 @@ def test_minutes_dash_for_nonpositive():
     from anvyl.history import _mins
 
     assert _mins(0) == "-" and _mins(-5) == "-" and _mins(120) == "2m"
+
+
+def test_none_ownership_renders_and_is_excluded_from_means():
+    rows = [_rec(1, 1, None), _rec(2, 1, 0.8)]
+    out = _out(rows)
+    assert "t1" in out and "t2" in out
+    assert summary_lines(rows)[0] == "Mean ownership: L1 80%"
