@@ -23,6 +23,8 @@ import time
 from importlib import resources
 from pathlib import Path
 
+from .judge import CODE_FENCE_RE
+
 SCHEMA_VERSION = 2
 ENV_VAR = "ANVYL_HOME"
 DEFAULT_DIRNAME = ".anvyl"
@@ -67,7 +69,7 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
     """Save one finished (or blocked) run as JSON. Returns the path."""
     sessions_dir_path = Path(sessions_dir_path)
     sessions_dir_path.mkdir(parents=True, exist_ok=True)
-    session_id = state.get("session_id", f"s-{int(time.time())}")
+    session_id = _check_session_id(state.get("session_id", f"s-{int(time.time())}"))
     path = sessions_dir_path / f"{session_id}.json"
     record: dict = {
         "schema_version": SCHEMA_VERSION,
@@ -103,7 +105,13 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
             record[key] = state.get(key)
         record["real"] = True
         record["files_read"] = state.get("files_read", [])
-        record["shown_snippets"] = state.get("shown_snippets", [])
+        record["shown_snippets_count"] = len(state.get("shown_snippets", []))
+        record["human_attempt"] = _strip_code(state.get("human_attempt"))
+        record["attempts"] = [
+            _strip_code(a) for a in state.get("attempts", []) if isinstance(a, str)
+        ]
+        events = [_scrub_event(e) for e in state.get("events", [])]
+        record["events"] = [e for e in events if e is not None]
         changes = state.get("changes") or {}
         record["changes"] = {k: changes.get(k, 0) for k in ("files", "added", "removed")}
     else:
@@ -111,6 +119,21 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
         record["verification"] = state.get("verification")
     path.write_text(json.dumps(record, indent=2, default=str))
     return path
+
+
+def _strip_code(text: object) -> object:
+    return CODE_FENCE_RE.sub("[code removed]", text) if isinstance(text, str) else text
+
+
+def _scalar(v: object) -> bool:
+    return isinstance(v, int | float | bool) or (isinstance(v, str) and len(v) <= 40)
+
+
+def _scrub_event(event: object) -> object:
+    """Keep only short scalars so a diff or file body can't ride along in an event."""
+    if isinstance(event, dict):
+        return {k: v for k, v in event.items() if _scalar(v)}
+    return event if _scalar(event) else None
 
 
 def _check_session_id(session_id: str) -> str:
@@ -140,6 +163,8 @@ def save_diff(sessions_dir: Path, session_id: str, text: str) -> Path:
 def cleanup_stale_work(data_dir: Path, max_age_days: int = 7) -> int:
     """Remove direct-child work dirs untouched for max_age_days. Returns the count."""
     work = Path(data_dir) / "work"
+    if work.is_symlink():
+        return 0
     cutoff = time.time() - max_age_days * 86400
     removed = 0
     try:
@@ -164,10 +189,13 @@ def reset_data(data_dir: Path) -> None:
     if raw in ("", "."):
         raise ValueError("refusing to reset: empty path")
     path = Path(data_dir)
+    if not path.is_absolute():
+        raise ValueError(f"refusing to reset: not an absolute path: {path}")
     if path.is_symlink() or not path.is_dir():
         raise ValueError(f"refusing to reset: not a real directory: {path}")
     real = path.resolve()
-    if real == real.parent or real == Path.home().resolve():
+    home = Path.home().resolve()
+    if real == real.parent or real == home or real in home.parents:
         raise ValueError(f"refusing to reset: {real}")
     for child in path.iterdir():
         if child.is_symlink() or not child.is_dir():

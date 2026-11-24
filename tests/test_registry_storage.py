@@ -197,3 +197,66 @@ def test_reset_data_refuses_dangerous_dirs(tmp_path):
         with pytest.raises(ValueError):
             reset_data(bad)
     assert (real / "f").exists()
+
+
+def test_real_session_drops_snippets_attempt_code_and_event_blobs(tmp_path):
+    fence = "```python\nSECRET_CODE = 1\n```"
+    st = _real_state(
+        shown_snippets=["SNIPPET_TEXT"],
+        human_attempt=f"my idea {fence} done",
+        attempts=[f"try {fence}"],
+        events=[
+            "started",
+            "+ DIFF_LINE " + "x" * 80,
+            {"n": 1, "s": "ok", "blob": [1], "long": "y" * 50},
+        ],
+    )
+    text = save_session(st, tmp_path).read_text()
+    record = json.loads(text)
+    for secret in ("SNIPPET_TEXT", "SECRET_CODE", "DIFF_LINE", "y" * 50):
+        assert secret not in text
+    assert record["shown_snippets_count"] == 1 and "shown_snippets" not in record
+    assert "my idea" in record["human_attempt"]
+    assert record["events"] == ["started", {"n": 1, "s": "ok"}]
+
+
+def test_tutorial_session_keeps_attempts_and_events(tmp_path):
+    fence = "```python\nx = 1\n```"
+    st = {"session_id": "s-t", "human_attempt": fence, "events": ["e" * 80]}
+    record = json.loads(save_session(st, tmp_path).read_text())
+    assert record["human_attempt"] == fence and record["events"] == ["e" * 80]
+
+
+def test_save_session_rejects_traversal_id(tmp_path):
+    with pytest.raises(ValueError):
+        save_session({"session_id": "../x"}, tmp_path / "sessions")
+
+
+def test_reset_data_refuses_home_ancestor_and_relative_allows_inside_home(tmp_path, monkeypatch):
+    home = tmp_path / "Users" / "me"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    (tmp_path / "Users" / "other.txt").write_text("x")
+    with pytest.raises(ValueError):
+        reset_data(tmp_path / "Users")
+    assert (tmp_path / "Users" / "other.txt").exists()
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError):
+        reset_data(Path("Users"))
+    inside = home / ".anvyl"
+    inside.mkdir()
+    (inside / "f").write_text("x")
+    reset_data(inside)
+    assert inside.is_dir() and list(inside.iterdir()) == []
+
+
+def test_cleanup_ignores_symlinked_work_dir(tmp_path):
+    other = tmp_path / "other"
+    (other / "old").mkdir(parents=True)
+    ancient = time.time() - 30 * 86400
+    os.utime(other / "old", (ancient, ancient))
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "work").symlink_to(other)
+    assert cleanup_stale_work(data) == 0
+    assert (other / "old").exists()
