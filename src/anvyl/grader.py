@@ -20,7 +20,7 @@ SYSTEM = (
 MIN_WORDS = 3
 # CSI / OSC sequences (whole), then any leftover C0/C1 controls except \n and \t.
 _ESC_SEQ = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 _WRAPPER = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
 
@@ -29,6 +29,14 @@ class Grade:
     score: float
     correct: list[bool]
     feedback: list[str]
+
+
+_ENVELOPE = re.compile(r"<(\s*/?\s*(?:question|answer)_\d+\s*>)", re.IGNORECASE)
+
+
+def _defang(text: str) -> str:
+    """Neutralize any question_N/answer_N tag so one entry can't forge another's fence."""
+    return _ENVELOPE.sub(r"&lt;\1", text)
 
 
 def _clean(text: str, cap: int = 500) -> str:
@@ -102,7 +110,9 @@ def grade_answers(client: ModelClient, changes_text: str, qa: list[tuple[str, st
     if sent:
         # One fence per answer: an answer cannot forge another entry.
         pairs = "\n".join(
-            f"Question {n}: {qa[i][0]}\n" + fence(f"answer_{n}", qa[i][1])
+            fence(f"question_{n}", _defang(qa[i][0]))
+            + "\n"
+            + fence(f"answer_{n}", _defang(qa[i][1]))
             for n, i in enumerate(sent, 1)
         )
         data = _ask(
