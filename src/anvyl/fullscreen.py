@@ -234,6 +234,10 @@ class FullScreen:
             self.version += 1
         self._redraw()
 
+    def plain(self) -> str:
+        with self.lock:
+            return Text.from_ansi(self.raw).plain
+
     def clear(self) -> None:
         with self.lock:
             self.raw, self.lines = "", []

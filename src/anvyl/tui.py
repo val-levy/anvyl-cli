@@ -47,6 +47,8 @@ COMMANDS = {
     "/status": "show step, level, gate and usage",
     "/score": "show the last scorecard",
     "/model": "pick a model (OpenRouter, with prices)",
+    "/history": "your past sessions",
+    "/copy": "copy last coach answer (/copy all: whole screen)",
     "/usage": "session time, tokens, files sent",
     "/clear": "clear the screen",
     "/plugin": "list | load | unload <id>",

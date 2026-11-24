@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 import uuid
@@ -39,6 +41,7 @@ from .changes import clear_snapshot
 from .driver import drive
 from .grader import _clean
 from .graph import LOOP_STEPS, build_real_graph
+from .history import load_sessions, render_history
 from .llm import ModelClient, ModelError, OpenRouterClient
 from .policy import REAL_MAX_LEVEL, clamp_real_level
 from .profile import FolderConfig, Profile, effective_profile
@@ -164,6 +167,7 @@ class Session:
         self.score_lines: list[str] = []
         self.saver: SqliteSaver | None = None
         self.t0 = time.monotonic()
+        self.last_answer = ""
         self.plugins = PluginRegistry(data_dir / "plugins")
         self.skills = SkillRegistry(data_dir / "skills")
 
@@ -259,6 +263,14 @@ class Session:
                 ui.clear()
             else:
                 self.console.clear()
+        elif cmd == "/history":
+            render_history(load_sessions(sessions_dir(self.data_dir)), self.console)
+        elif cmd == "/copy":
+            ui = getattr(self.console, "ui", None)
+            if arg == "all" and ui:
+                self.copy(ui.plain(), "transcript")
+            else:
+                self.copy(self.last_answer, "last coach answer")
         elif cmd == "/model":
             self.pick_model(" ".join(args))
         elif cmd == "/plugin":
@@ -306,6 +318,21 @@ class Session:
             self.say(f"{cmd} is only valid at a work prompt")
         else:
             self.say(f"unknown command {cmd} (try /help)")
+
+    def copy(self, text: str, what: str) -> None:
+        """Put text on the system clipboard via a fixed local tool (no shell, text on stdin)."""
+        tools = (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"], ["clip.exe"])
+        argv = next((t for t in tools if shutil.which(t[0])), None)
+        if not text.strip():
+            self.say(f"nothing to copy yet ({what})", MUTED)
+        elif argv is None:
+            self.say("no clipboard tool found (pbcopy, wl-copy, xclip)", RED)
+        else:
+            try:
+                subprocess.run(argv, input=text.encode(), check=True, timeout=5)
+                self.say(f"copied {what} ({len(text)} chars)", MUTED)
+            except (OSError, subprocess.SubprocessError):
+                self.say("clipboard copy failed", RED)
 
     def pick_model(self, query: str) -> None:
         """/model [filter]: list OpenRouter models with $/M-token prices, pick by number or id.
@@ -421,7 +448,8 @@ class Session:
         if kind == "coach_next":
             label = "● " if self.console.is_terminal else "coach: "
             self.console.print(label, style=COACH, end="", markup=False, highlight=False)
-            typewrite(self.console, _clean(str(payload.get("text", "")), 4000))
+            self.last_answer = _clean(str(payload.get("text", "")), 4000)
+            typewrite(self.console, self.last_answer)
         elif kind == "error":
             self.say(payload.get("message", ""), RED)
         self.say(payload.get("prompt", ""), COACH)

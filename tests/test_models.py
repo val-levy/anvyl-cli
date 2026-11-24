@@ -65,3 +65,19 @@ def test_model_command_filters_then_picks_exact_id_and_offline(tmp_path, monkeyp
     assert FolderConfig(data).model() == "b/free"
     monkeypatch.setattr(models, "fetch", lambda: [])
     assert "could not load" in go(root, data, ["/model", "/quit"]).out
+
+
+def test_history_and_copy(tmp_path, monkeypatch):
+    import subprocess
+
+    from anvyl import session
+
+    sent = []
+    monkeypatch.setattr(session.shutil, "which", lambda n: "/x/" + n if n == "pbcopy" else None)
+    monkeypatch.setattr(session.subprocess, "run", lambda a, **k: sent.append((a, k["input"])))
+    root, data = prep(tmp_path)
+    r = go(root, data, ["/history", "/copy", "/copy all", "/quit"])
+    assert "No sessions yet" in r.out and "nothing to copy" in r.out
+    s = session.Session(root, data, __import__("rich.console").console.Console(), None, str)
+    s.copy("hello", "x")
+    assert sent == [(["pbcopy"], b"hello")] and subprocess
