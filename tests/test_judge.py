@@ -18,10 +18,22 @@ from anvyl.judge import judge_check
         "impl Foo for Bar",
         "public static void main(String[] a) {",
         "#include <stdio.h>",
+        "foo(bar);",
+        "x = compute();",
+        "console.log(x);",
+        "System.out.println(x);",
+        "use std::io;",
+        "if (x) {",
+        "} else {",
+        "else {",
+        "while (true) {",
+        "async function f() {",
     ],
 )
 def test_code_line_in_any_language_leaks(line):
-    assert judge_check(f"Try this:\n{line}\nThen run it.")["leaked"] is True
+    verdict = judge_check(f"Try this:\n{line}\nThen run it.")
+    assert verdict["leaked"] is True
+    assert verdict["reasons"]
     cleaned, removed, _ = policy.strip_solution_code(f"Hint:\n{line}\nThink.", {"level": 1})
     assert line not in cleaned
     assert removed >= 1

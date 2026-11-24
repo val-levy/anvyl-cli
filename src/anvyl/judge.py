@@ -23,7 +23,7 @@ CODE_LINE_RE = re.compile(
     # Java/C#, C
     r"public |private |static |#include)"
     # any language: statement terminator or block opener
-    r"|[;{]\s*$"
+    r"|.*[;{]\s*$"
 )
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 MAX_INLINE_CHARS = 60
