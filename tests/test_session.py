@@ -162,7 +162,9 @@ def test_consent_refused_runs_ticket_only_and_sends_no_file_content(tmp_path):
     assert not FolderConfig(data).consented(root)
     assert client.calls, "the session did call the model"
     assert all(tools is None for _m, tools in client.calls)
-    assert "SENTINEL_FILE_BODY_55" not in json.dumps(client.calls)
+    sent = json.dumps(client.calls)
+    for leak in ("SENTINEL_FILE_BODY_55", "y = 2", "z = 3", "app.py"):
+        assert leak not in sent
 
 
 def test_consent_given_offers_file_tools(tmp_path):
@@ -476,3 +478,24 @@ def test_reset_eof_aborts_and_unsafe_target_is_a_clean_error(tmp_path, monkeypat
     assert cli.main(["reset", "--data-dir", str(link)]) == 1
     err = capsys.readouterr().err
     assert "refusing to reset" in err and "Traceback" not in err and (data / "x.txt").exists()
+
+
+def test_failed_delete_keeps_marker_so_a_later_purge_removes_the_thread(tmp_path, monkeypatch):
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    real = SqliteSaver.delete_thread
+
+    def boom(self, thread_id):
+        raise sqlite3.OperationalError("database is locked")
+
+    root, data = prep(tmp_path)
+    monkeypatch.setattr(SqliteSaver, "delete_thread", boom)
+    r = go(root, data, one_ticket(root), client=FakeClient(ticket_script()))
+    assert r.rc == 0 and "Traceback" not in r.out
+    marks = list((data / "threads").iterdir())
+    assert len(marks) == 1 and thread_rows(data) > 0
+    monkeypatch.setattr(SqliteSaver, "delete_thread", real)
+    old = time.time() - 8 * 86400
+    os.utime(marks[0], (old, old))
+    go(root, data, [])
+    assert not marks[0].exists() and thread_rows(data) == 0

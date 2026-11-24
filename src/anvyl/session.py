@@ -48,7 +48,9 @@ from .storage import (
 )
 
 LOGIN_HINT = 'not logged in: run "anvyl login"'
-TICKET_ONLY = "[!] ticket-and-plan-only coaching: the model will not see your files"
+TICKET_ONLY = (
+    "[!] ticket-and-plan-only coaching: the model sees only your ticket text and what you type"
+)
 RAIL_MIN_WIDTH = 110
 STALE_DAYS = 7
 HELP = (
@@ -87,8 +89,11 @@ def open_checkpointer(data_dir: Path) -> Iterator[SqliteSaver]:
 
 def _forget_thread(saver: SqliteSaver, data_dir: Path, thread_id: str) -> None:
     """Delete a thread's checkpoints and marker, and fold the WAL so no old copy lingers."""
-    with contextlib.suppress(Exception):
+    try:
         saver.delete_thread(thread_id)
+    except Exception:
+        # keep the marker so the stale purge can retry later
+        return
     (data_dir / "threads" / thread_id).unlink(missing_ok=True)
     with contextlib.suppress(Exception):
         saver.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

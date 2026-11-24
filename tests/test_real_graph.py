@@ -156,12 +156,12 @@ def test_state_and_checkpoint_never_contain_file_contents(tmp_path):
     assert secret.encode() not in run.db
 
 
-def test_without_file_consent_the_grader_sees_only_added_lines(tmp_path):
+def test_without_file_consent_no_diff_content_reaches_the_model(tmp_path):
     client = FakeClient([GATE_OK, COACH, QS, GOOD])
     run_real(tmp_path, client, answers(work=edit("y = 2\n")))
     sent = json.dumps(client.calls[2:])  # explain-back questions and grading
-    assert "y = 2" in sent
-    assert "x = 1" not in sent and "app.py" not in sent, "untouched content/file names stay local"
+    for leak in ("y = 2", "x = 1", "app.py"):
+        assert leak not in sent, f"{leak!r} is file content and must stay local"
 
 
 def test_keep_diffs_writes_diff_only_when_enabled(tmp_path):

@@ -368,9 +368,8 @@ def build_real_graph(
         c = changes_mod.compute_changes(root, profile, work_dir)
         if coach.can_read_files:
             return c.text
-        # Ticket-and-plan-only: the model gets the user's added lines, never untouched
-        # context, removed lines or file names from the project.
-        return "\n".join(f"+{ln}" for ln in c.added_lines)
+        # Ticket-and-plan-only: nothing from the diff (added lines can carry old text).
+        return ""
 
     # -- nodes -----------------------------------------------------------
     def ticket_node(state: HarnessState) -> Command:
