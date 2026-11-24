@@ -1,0 +1,95 @@
+[
+  {
+    "name": "add-retry",
+    "diff": "--- a/net.py\n+++ b/net.py\n+for _ in range(3):\n+    try: return fetch()\n+    except TimeoutError: continue",
+    "questions": [
+      "What does this change do?",
+      "Why retry in a loop?",
+      "What could break?"
+    ],
+    "answers": {
+      "good": [
+        "It retries fetch up to three times on timeout.",
+        "A loop keeps it simple and bounded without extra dependencies.",
+        "A slow server could make calls take triple the time."
+      ],
+      "vague": [
+        "It works",
+        "Dunno",
+        "Because"
+      ],
+      "wrong": [
+        "It makes fetch faster by caching results.",
+        "To save memory on the heap.",
+        "Nothing at all can break here."
+      ]
+    },
+    "expected": {
+      "good": 1.0,
+      "vague": 0.0,
+      "wrong": 0.0
+    }
+  },
+  {
+    "name": "fix-offbyone",
+    "diff": "--- a/p.py\n+++ b/p.py\n-for i in range(len(xs)-1):\n+for i in range(len(xs)):",
+    "questions": [
+      "What does this change do?",
+      "Why this way?",
+      "What could break?"
+    ],
+    "answers": {
+      "good": [
+        "It now visits the last element of the list too.",
+        "range(len(xs)) covers every index directly.",
+        "An empty list is fine but code indexing i+1 would overflow."
+      ],
+      "vague": [
+        "Fixes it",
+        "Not sure",
+        "Just because"
+      ],
+      "wrong": [
+        "It skips the first element of the list.",
+        "Because recursion is faster than loops.",
+        "The import statement might fail on startup."
+      ]
+    },
+    "expected": {
+      "good": 1.0,
+      "vague": 0.0,
+      "wrong": 0.0
+    }
+  },
+  {
+    "name": "add-flag",
+    "diff": "--- a/cli.py\n+++ b/cli.py\n+parser.add_argument('--dry-run', action='store_true')",
+    "questions": [
+      "What does this change do?",
+      "Why a store_true flag?",
+      "What could break?"
+    ],
+    "answers": {
+      "good": [
+        "It adds a dry-run option that defaults to false.",
+        "store_true needs no value so usage is just the flag.",
+        "Callers must actually honour the flag or it silently does nothing."
+      ],
+      "vague": [
+        "Adds flag",
+        "Ok",
+        "Simple"
+      ],
+      "wrong": [
+        "It deletes the parser object entirely.",
+        "Flags must always take integer values.",
+        "The database schema could be corrupted."
+      ]
+    },
+    "expected": {
+      "good": 1.0,
+      "vague": 0.0,
+      "wrong": 0.0
+    }
+  }
+]
