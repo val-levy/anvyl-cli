@@ -24,6 +24,7 @@ import time
 from importlib import resources
 from pathlib import Path
 
+from .guard import redact
 from .judge import CODE_LINE_RE
 
 SCHEMA_VERSION = 2
@@ -135,7 +136,7 @@ def _scrub_text(value: object) -> str:
     lines = [
         ln for ln in text.splitlines() if not (CODE_LINE_RE.match(ln) or _INDENTED_RE.match(ln))
     ]
-    return "\n".join(lines)[:500]
+    return redact("\n".join(lines))[0][:500]  # keys typed into answers never reach disk
 
 
 def _scrub_list(value: object) -> list[str]:

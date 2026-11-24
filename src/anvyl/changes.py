@@ -1,5 +1,6 @@
 """Session change tracking: transient baseline copies plus in-memory diffs."""
 
+import contextlib
 import difflib
 import shutil
 from dataclasses import dataclass
@@ -81,3 +82,5 @@ def count_ai_lines(added_lines: list[str], shown_snippets: list[str]) -> int:
 
 def clear_snapshot(work_dir: Path) -> None:
     shutil.rmtree(work_dir / "base", ignore_errors=True)
+    with contextlib.suppress(OSError):
+        work_dir.rmdir()  # only removes it when empty
