@@ -104,7 +104,7 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
     if state.get("real"):
         for key in ("profile", "folder"):
             record[key] = state.get(key)
-        for key in ("ticket", "goal", "human_attempt"):
+        for key in ("ticket", "goal", "human_attempt", "task_title"):
             record[key] = _scrub_text(state.get(key))
         for key in ("attempts", "questions", "answers", "feedback", "errors"):
             record[key] = _scrub_list(state.get(key))
@@ -123,8 +123,8 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
 
 
 _FENCE_RE = re.compile(r"(```|~~~).*?(\1|\Z)", re.DOTALL)
-_INLINE_RE = re.compile(r"`[^`]*`?")
-_INDENTED_RE = re.compile(r"^(\t| {4})")
+_INLINE_RE = re.compile(r"`[^\n]*")  # first backtick to end of line; linear
+_INDENTED_RE = re.compile(r"^[ \t]+\S")
 
 
 def _scrub_text(value: object) -> str:
@@ -149,7 +149,7 @@ def _scalar(v: object) -> bool:
 def _scrub_event(event: object) -> object:
     """Keep only short scalars so a diff or file body can't ride along in an event."""
     if isinstance(event, dict):
-        return {k: v for k, v in event.items() if _scalar(v)}
+        return {k: v for k, v in event.items() if isinstance(k, str) and _scalar(k) and _scalar(v)}
     return event if _scalar(event) else None
 
 

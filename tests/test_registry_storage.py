@@ -316,3 +316,33 @@ def test_reset_data_relative_path_refused_for_being_relative(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="absolute"):
         reset_data(Path("plain"))
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "use ``LEAK_DB`` here",
+        "use ```LEAK_TRI``` here",
+        "stray ` LEAK_STRAY",
+        " LEAK_D1 = 1",
+        "  LEAK_D2 = compute()",
+        "   LEAK_D3 = compute()",
+    ],
+)
+def test_real_session_scrubs_backticks_and_any_indent(tmp_path, leak):
+    st = _real_state(answers=[f"ok\n{leak}"], task_title=leak)
+    text = save_session(st, tmp_path).read_text()
+    assert "LEAK" not in text
+
+
+def test_inline_scrub_does_not_cross_lines():
+    from anvyl.storage import _scrub_text
+
+    assert "keep me" in _scrub_text("a ` stray\nkeep me\nb ` stray")
+    assert _scrub_text("`" * 100_000) == ""
+
+
+def test_real_session_dict_event_keys_filtered(tmp_path):
+    st = _real_state(events=[{("t", 1): 1, "K" * 200 + "LEAK_KEY": 1, "ok": 2}])
+    record = json.loads(save_session(st, tmp_path).read_text())
+    assert record["events"] == [{"ok": 2}]
