@@ -70,6 +70,11 @@ class HarnessState(TypedDict, total=False):
     shown_snippets: Annotated[list, add]
     files_read: Annotated[list, add]
     real: bool
+    fault: str  # fixed safe message while a model error awaits retry/quit
+    quit: bool
+    abandoned: bool
+    gate_tries: int
+    gate_reason: str
 
 
 def initial_state(
