@@ -339,6 +339,14 @@ class Session:
             except (OSError, subprocess.SubprocessError):
                 self.say("clipboard copy failed", RED)
 
+    def set_model(self, chosen: modelcat.Model) -> None:
+        if self.client is not None:
+            self.client.model = chosen.id  # type: ignore[attr-defined]
+        self.cfg.set_model(chosen.id)
+        p = f"${modelcat.money(chosen.price_in).strip()} in / "
+        p += f"${modelcat.money(chosen.price_out).strip()} out per 1M tokens"
+        self.say(f"model -> {chosen.id}  ({p})")
+
     def pick_model(self, query: str) -> None:
         """/model [filter]: list OpenRouter models with $/M-token prices, pick by number or id.
         Only tool-capable models are listed (the coach needs tools). Applies to the next call."""
@@ -347,6 +355,21 @@ class Session:
             cat = [m for m in modelcat.fetch() if m.tools]
         if not cat:
             self.say("could not load the model list (offline?). Current: " + (cur or "?"), RED)
+            return
+        ui = getattr(self.console, "ui", None)
+        if ui:
+            rows = [
+                (
+                    f"{'●' if m.id == cur else ' '} {m.id}",
+                    f"${modelcat.money(m.price_in).strip()} in  "
+                    f"${modelcat.money(m.price_out).strip()} out /1M  "
+                    f"ctx {modelcat.ctx(m.context).strip()}",
+                )
+                for m in cat
+            ]
+            i = ui.choose("model", rows, "  (prices per 1M tokens)")
+            if i is not None:
+                self.set_model(cat[i])
             return
         shown = modelcat.search(cat, query)
         while True:
@@ -366,12 +389,7 @@ class Session:
             else:
                 chosen = next((m for m in cat if m.id == reply), None)
             if chosen:
-                if self.client is not None:
-                    self.client.model = chosen.id  # type: ignore[attr-defined]
-                self.cfg.set_model(chosen.id)
-                p = f"${modelcat.money(chosen.price_in).strip()} in / "
-                p += f"${modelcat.money(chosen.price_out).strip()} out per 1M tokens"
-                self.say(f"model -> {chosen.id}  ({p})")
+                self.set_model(chosen)
                 return
             shown = modelcat.search(cat, reply)
 
@@ -380,6 +398,24 @@ class Session:
         through policy.plugin_allowed. Loading records intent only: nothing is sent to the model."""
         sub, ident = (args[0].lower() if args else "list"), (args[1] if len(args) > 1 else "")
         known = {x["id"]: x for x in reg.list()}
+        ui = getattr(self.console, "ui", None)
+        if ui and not args and known:  # interactive menu: Enter toggles, Esc closes
+            while True:
+                known = {x["id"]: x for x in reg.list()}
+                ids = list(known)
+                rows = [
+                    (
+                        f"[{'x' if known[i]['loaded'] else ' '}] {i}",
+                        _clean(str(known[i].get("description", "")), 70),
+                    )
+                    for i in ids
+                ]
+                n = ui.choose(kind, rows, "  ([x] = loaded)")
+                if n is None:
+                    return
+                self.registry_cmd(
+                    kind, reg, ["unload" if known[ids[n]]["loaded"] else "load", ids[n]]
+                )
         if sub == "list":
             for i, x in known.items():
                 desc = _clean(str(x.get("description", "")), 80)

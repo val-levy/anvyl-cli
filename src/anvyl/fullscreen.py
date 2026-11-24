@@ -20,10 +20,13 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, FormattedText, to_formatted_text
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import (
+    ConditionalContainer,
     Dimension,
     Float,
     FloatContainer,
@@ -212,6 +215,8 @@ class FullScreen:
         self.busy_since: float | None = None
         self.q: queue.Queue[str | None] = queue.Queue()
         self.pending: list[str] = []
+        self.menu: dict[str, Any] | None = None  # the open picker, if any
+        self.menu_q: queue.Queue[int | None] = queue.Queue()
         self.words = list(SPIN_WORDS)
         self.transcript = _Transcript(self)
         self.input = Buffer(
@@ -350,6 +355,49 @@ class FullScreen:
             ]
         )
 
+    # -- picker (worker thread asks, UI thread answers) -------------------------------
+    def choose(self, title: str, items: list[tuple[str, str]], hint: str = "") -> int | None:
+        """Show a filterable list; return the chosen index, or None on Esc."""
+        with self.lock:
+            self.menu = {"title": title, "items": items, "q": "", "sel": 0, "hint": hint}
+        self._redraw()
+        got = self.menu_q.get()
+        with self.lock:
+            self.menu = None
+        self._redraw()
+        return got
+
+    def _visible(self) -> list[int]:
+        m = self.menu or {}
+        words = str(m.get("q", "")).lower().split()
+        return [
+            i
+            for i, (a, b) in enumerate(m.get("items", []))
+            if all(w in f"{a} {b}".lower() for w in words)
+        ]
+
+    def _menu_text(self) -> FormattedText:
+        m = self.menu
+        if not m:
+            return FormattedText([])
+        vis = self._visible()
+        sel = min(m["sel"], max(len(vis) - 1, 0))
+        top = max(0, min(sel - 5, len(vis) - 12))
+        out: list[Frag] = [
+            ("class:menu.title", f" {m['title']}  "),
+            ("class:menu.dim", f"{len(vis)}\n"),
+        ]
+        out.append(("class:menu.dim", f" › {m['q']}▏\n"))
+        for k in range(top, min(top + 12, len(vis))):
+            a, b = m["items"][vis[k]]
+            on = k == sel
+            out.append(("class:menu.sel" if on else "", f" {'▸' if on else ' '} {a}"))
+            out.append(("class:menu.sel" if on else "class:menu.dim", f"  {b}\n"))
+        if not vis:
+            out.append(("class:menu.dim", " no matches\n"))
+        out.append(("class:menu.dim", f" ↑↓ move · Enter select · Esc cancel{m['hint']}"))
+        return FormattedText(out)
+
     def _queued(self) -> FormattedText:
         rows = [(" ❯ " + " ".join(t.split())[:200] + "\n") for t in self.pending[-3:]]
         return FormattedText([("class:queued", "".join(rows).rstrip("\n"))])
@@ -389,9 +437,59 @@ class FullScreen:
         )
         # the input is pinned to the bottom, so the slash menu opens upward, above the rule
         menu = Float(left=2, bottom=4, content=CompletionsMenu(max_height=8, scroll_offset=1))
+        picker = Float(
+            left=1,
+            right=1,
+            bottom=3,
+            content=ConditionalContainer(
+                Window(
+                    FormattedTextControl(self._menu_text),
+                    height=lambda: 17,
+                    style="class:menu",
+                    dont_extend_height=True,
+                ),
+                filter=Condition(lambda: self.menu is not None),
+            ),
+        )
         kb = KeyBindings()
+        open_ = Condition(lambda: self.menu is not None)
 
-        @kb.add("enter")
+        def move(d: int) -> None:
+            with self.lock:
+                if self.menu:
+                    n = len(self._visible())
+                    self.menu["sel"] = max(0, min(self.menu["sel"] + d, n - 1))
+
+        @kb.add("up", filter=open_, eager=True)
+        def _(event: Any) -> None:
+            move(-1)
+
+        @kb.add("down", filter=open_, eager=True)
+        def _(event: Any) -> None:
+            move(1)
+
+        @kb.add("enter", filter=open_, eager=True)
+        def _(event: Any) -> None:
+            vis = self._visible()
+            if vis:
+                self.menu_q.put(vis[min(self.menu["sel"], len(vis) - 1)])  # type: ignore[index]
+
+        @kb.add("escape", filter=open_, eager=True)
+        @kb.add("c-d", filter=open_, eager=True)
+        def _(event: Any) -> None:
+            self.menu_q.put(None)
+
+        @kb.add("backspace", filter=open_, eager=True)
+        def _(event: Any) -> None:
+            if self.menu:
+                self.menu["q"], self.menu["sel"] = self.menu["q"][:-1], 0
+
+        @kb.add(Keys.Any, filter=open_, eager=True)
+        def _(event: Any) -> None:
+            if self.menu and event.data.isprintable():
+                self.menu["q"], self.menu["sel"] = self.menu["q"] + event.data, 0
+
+        @kb.add("enter", filter=~open_)
         def _(event: Any) -> None:
             self._submit()
 
@@ -419,7 +517,7 @@ class FullScreen:
             event.app.exit()
 
         return Application(
-            layout=Layout(FloatContainer(body, floats=[menu]), focused_element=input_win),
+            layout=Layout(FloatContainer(body, floats=[menu, picker]), focused_element=input_win),
             key_bindings=kb,
             style=STYLE,
             full_screen=True,

@@ -85,3 +85,31 @@ def test_queue_feeds_chat_prompts_only_and_echo_is_a_band():
     assert "\x1b[48;2;43;45;49m" in ui.raw  # the dark band behind your message
     ui.q.put("y")  # a non-chat prompt ignores the queue and waits for fresh input
     assert ui.read("[y/N] ") == "y" and ui.pending == ["second"]
+
+
+def test_picker_filters_moves_and_returns_index():
+    sess = SimpleNamespace(
+        root="/x", view={}, profile=Profile.PERSONAL, mode="learn", level=1, stats=lambda: (0, 0)
+    )
+    got: dict = {}
+    with create_pipe_input() as pipe:
+        ui = FullScreen(sess, input=pipe, output=Out())
+
+        def body():
+            got["i"] = ui.choose("model", [("a/one", "$1"), ("b/two", "$2"), ("b/three", "$3")])
+            got["esc"] = ui.choose("model", [("a/one", "$1")])
+            return 0
+
+        threading.Thread(target=lambda: ui.run(body), daemon=True).start()
+        assert wait_for(lambda: ui.menu is not None)
+        assert any("b/two" in r for r in screen(ui))
+        pipe.send_text("b")  # filter to b/two, b/three
+        assert wait_for(lambda: len(ui._visible()) == 2)
+        pipe.send_text("\x1b[B")  # down
+        assert wait_for(lambda: ui.menu["sel"] == 1)
+        pipe.send_text("\r")
+        assert wait_for(lambda: "i" in got and got["i"] == 2)
+        assert wait_for(lambda: ui.menu is not None)
+        pipe.send_text("\x1b")  # Esc cancels
+        assert wait_for(lambda: "esc" in got) and got["esc"] is None
+        ui.q.put(None)

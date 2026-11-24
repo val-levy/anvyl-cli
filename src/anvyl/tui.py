@@ -37,7 +37,7 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.styles import Style
 
-from .theme import ACCENT, COACH, MUTED
+from .theme import ACCENT, COACH, MUTED, USER_BG
 
 if TYPE_CHECKING:
     from .session import Session
@@ -73,6 +73,10 @@ STYLE = Style.from_dict(
         "spin.glyph": ACCENT,
         "spin.word": COACH,
         "spin.time": MUTED,
+        "menu": f"bg:{USER_BG}",
+        "menu.title": f"bold {ACCENT}",
+        "menu.sel": f"bold {ACCENT}",
+        "menu.dim": MUTED,
         "completion-menu": "bg:default",
         "completion-menu.completion": f"bg:default {MUTED}",
         "completion-menu.completion.current": f"bg:default bold {ACCENT}",
