@@ -4,6 +4,9 @@ and the scorecard. Driven with scripted answers, no model calls."""
 import json
 
 from conftest import FixedProvider, run_task
+from support import FakeClient
+
+from anvyl.llm import ChatResult
 
 
 def test_learn_loop_end_to_end(tmp_path):
@@ -27,13 +30,12 @@ def test_learn_loop_end_to_end(tmp_path):
     assert saved["verification"]["passed"] is True
 
 
-def test_learn_loop_with_live_coach_stub(tmp_path, monkeypatch):
-    """Live path via a stub helper: the scorecard must record live_model."""
-    stub = tmp_path / "helper.py"
-    stub.write_text("#!/usr/bin/env python3\nprint('What changes between attempts?')\n")
-    monkeypatch.setenv("HARNESS_OPENROUTER_HELPER", str(stub))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    result = run_task("toy-backoff", mode="learn", level=1, tmp_path=tmp_path, live=True)
+def test_learn_loop_with_live_coach_stub(tmp_path):
+    """Live path via FakeClient: the scorecard must record live_model."""
+    client = FakeClient([ChatResult("What changes between attempts?", [], 5)] * 10)
+    result = run_task(
+        "toy-backoff", mode="learn", level=1, tmp_path=tmp_path, live=True, client=client
+    )
     assert result["live_model"] is True
     assert result["gate_passed"] is True
     assert result["ownership_score"] == 1.0

@@ -1,16 +1,7 @@
-"""Coach: Claude via OpenRouter (live), or deterministic offline hints.
+"""Coach: a model client (live), or deterministic offline hints.
 
-Live path, in order:
-
-1. ``OPENROUTER_API_KEY`` env var -> direct HTTPS POST to
-   ``https://openrouter.ai/api/v1/chat/completions``. This is the
-   standard way to run the coach outside the author's machine.
-2. ``HARNESS_OPENROUTER_HELPER`` env var -> a helper script with a
-   ``chat --model ID --message TEXT`` interface (the author's
-   connector helper). Used only if no API key is set.
-
-No credential is ever stored in the repo or in code. If neither is
-available the coach falls back to offline hints and says so.
+The live path uses an injected ``ModelClient`` (default: OpenRouter via
+``anvyl login``). If it fails the coach falls back to offline hints.
 
 Offline path is the default for demo runs: deterministic, free, and the
 same rung ladder the live coach is instructed to follow. Every reply --
@@ -21,21 +12,12 @@ still cannot leak solution code at L1.
 
 from __future__ import annotations
 
-import json
-import os
-import subprocess
-import sys
-import urllib.request
-from pathlib import Path
-
 from . import policy
 from .judge import judge_check
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = os.environ.get("ANVYL_MODEL", "anthropic/claude-sonnet-4.5")
+from .llm import ModelClient, ModelError, default_client
 
 LIVE_SYSTEM = (
-    "You are a coach in a human-most-of-the-loop coding coach. "
+    "You are a coach in a human-most-of-the-loop coding tool. "
     "The human is the driver; you are the navigator. "
     "Ask questions and give hints only. Never write solution code, never "
     "write a full function, never paste a code block, never give the "
@@ -44,75 +26,25 @@ LIVE_SYSTEM = (
 )
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args):  # type: ignore[override]
-        raise RuntimeError("redirect refused, verify the endpoint")
-
-
-def _direct_api_call(system: str, user: str, model: str, timeout: int) -> str | None:
-    """POST to OpenRouter with the env API key. Returns reply or None."""
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        return None
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "max_tokens": 300,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(OPENROUTER_URL, data=payload, method="POST")
-    request.add_header("Content-Type", "application/json")
-    request.add_header("Accept", "application/json")
-    request.add_header("Authorization", f"Bearer {api_key}")
-    try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-    choices = result.get("choices", [])
-    if not choices:
-        return None
-    return (choices[0].get("message", {}).get("content", "") or "").strip() or None
-
-
-def _helper_call(system: str, user: str, model: str, timeout: int) -> str | None:
-    """Call the external helper script, if HARNESS_OPENROUTER_HELPER is set."""
-    helper = os.environ.get("HARNESS_OPENROUTER_HELPER")
-    if not helper or not Path(helper).exists():
-        return None
-    message = f"{system}\n\n---\n\n{user}"
-    try:
-        proc = subprocess.run(
-            [sys.executable, helper, "chat", "--model", model, "--message", message],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    return (proc.stdout or "").strip() or None
-
-
 class Coach:
-    def __init__(self, live: bool = False, model: str = MODEL):
+    def __init__(self, live: bool = False, client: ModelClient | None = None):
         self.live_requested = live
         self.live_available: bool | None = None  # None = untested
-        self.model = model
+        self.client = client
 
-    def live_call(self, system: str, user: str, timeout: int = 90) -> str | None:
-        """One live chat call. Direct API first, helper script second.
-        Returns the reply text, or None if no live path worked (caller
-        falls back to offline hints)."""
-        text = _direct_api_call(system, user, self.model, timeout)
-        if text is None:
-            text = _helper_call(system, user, self.model, timeout)
-        return text
+    def live_call(self, system: str, user: str) -> str | None:
+        """One live chat call. Returns the reply text, or None on any
+        ModelError (caller falls back to offline hints)."""
+        try:
+            if self.client is None:
+                self.client = default_client()
+            text = self.client.chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                max_tokens=300,
+            ).text
+        except ModelError:
+            return None
+        return text or None
 
     def offline_reply(self, task: dict, state: dict) -> str:
         """Deterministic rung-ladder hint. No code, ever."""

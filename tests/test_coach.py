@@ -1,13 +1,10 @@
-"""Coach tests: offline fallback, and the live path via a stub helper.
+"""Coach tests: offline fallback, and the live path via FakeClient. No network."""
 
-No real API key or network is used here. The live path is exercised
-through HARNESS_OPENROUTER_HELPER pointing at a stub script.
-"""
-
-import stat
+from support import FakeClient
 
 from anvyl import tasks as tasks_mod
 from anvyl.coach import Coach
+from anvyl.llm import ChatResult, ModelError
 
 
 def _state(**over):
@@ -23,11 +20,11 @@ def _state(**over):
 
 
 def test_live_without_credentials_falls_back_offline(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("HARNESS_OPENROUTER_HELPER", raising=False)
+    monkeypatch.setattr("anvyl.auth.get_api_key", lambda data_dir=None: None)
     coach = Coach(live=True)
     result = coach.reply(tasks_mod.get_task("toy-backoff"), _state())
     assert result["live"] is False
+    assert coach.live_available is False
     assert result["text"], "offline fallback must still answer"
     assert "```" not in result["text"]
 
@@ -41,31 +38,22 @@ def test_offline_coach_never_returns_code():
         assert "def retry" not in result["text"]
 
 
-def test_live_via_helper_stub(monkeypatch, tmp_path):
-    stub = tmp_path / "fake-helper.py"
-    stub.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        "print('What changes between one failed call and the next?')\n"
-    )
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setenv("HARNESS_OPENROUTER_HELPER", str(stub))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    coach = Coach(live=True)
-    text = coach.live_call("system", "user")
+def test_live_via_client():
+    fake = FakeClient([ChatResult("What changes between one failed call and the next?", [], 5)])
+    text = Coach(live=True, client=fake).live_call("system", "user")
     assert text == "What changes between one failed call and the next?"
 
 
-def test_coach_strips_leaked_code_from_live_reply(monkeypatch, tmp_path):
-    stub = tmp_path / "leaky-helper.py"
-    stub.write_text(
-        "#!/usr/bin/env python3\n"
-        "print('Here you go:\\n```python\\ndef retry(fn):\\n    return fn()\\n```')\n"
-    )
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setenv("HARNESS_OPENROUTER_HELPER", str(stub))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    coach = Coach(live=True)
+def test_model_error_falls_back_offline():
+    coach = Coach(live=True, client=FakeClient([ModelError("down")]))
+    result = coach.reply(tasks_mod.get_task("toy-backoff"), _state())
+    assert result["live"] is False and coach.live_available is False
+    assert result["text"]
+
+
+def test_coach_strips_leaked_code_from_live_reply():
+    leak = "Here you go:\n```python\ndef retry(fn):\n    return fn()\n```"
+    coach = Coach(live=True, client=FakeClient([ChatResult(leak, [], 9)]))
     result = coach.reply(tasks_mod.get_task("toy-backoff"), _state())
     assert result["live"] is True, "live call ran"
     assert result["judge"]["leaked"] is False, "leaked code must not reach the human"

@@ -103,12 +103,10 @@ model (Claude via OpenRouter):
 
 ```bash
 export OPENROUTER_API_KEY="..."        # standard path
-# or point at a helper script with a `chat` subcommand:
-export HARNESS_OPENROUTER_HELPER="/path/to/openrouter.py"
 harness --task toy-backoff --mode learn --live
 ```
 
-No key is ever stored in the repo. Without a key or helper, `--live`
+No key is ever stored in the repo. Without a key, `--live`
 falls back to offline hints and says so in the scorecard (`live model:
 no`).
 

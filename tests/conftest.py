@@ -20,11 +20,18 @@ from anvyl.state import initial_state  # noqa: E402
 
 
 def run_task(
-    task_id, mode="learn", level=1, high_stakes=False, tmp_path=None, live=False, provider=None
+    task_id,
+    mode="learn",
+    level=1,
+    high_stakes=False,
+    tmp_path=None,
+    live=False,
+    provider=None,
+    client=None,
 ):
     """Drive one full graph run with scripted answers. Returns the final state."""
     task = tasks_mod.get_task(task_id)
-    coach = Coach(live=live)
+    coach = Coach(live=live, client=client)
     session_id = f"test-{task_id}-{mode}-L{level}"
     state0 = initial_state(
         session_id=session_id,
