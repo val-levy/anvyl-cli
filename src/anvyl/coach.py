@@ -32,10 +32,10 @@ from . import policy
 from .judge import judge_check
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL = os.environ.get("HARNESS_MODEL", "anthropic/claude-sonnet-4.5")
+MODEL = os.environ.get("ANVYL_MODEL", "anthropic/claude-sonnet-4.5")
 
 LIVE_SYSTEM = (
-    "You are a coach in a human-most-of-the-loop coding harness. "
+    "You are a coach in a human-most-of-the-loop coding coach. "
     "The human is the driver; you are the navigator. "
     "Ask questions and give hints only. Never write solution code, never "
     "write a full function, never paste a code block, never give the "

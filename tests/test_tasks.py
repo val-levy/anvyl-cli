@@ -1,6 +1,6 @@
 """Task verification + answer scoring tests."""
 
-from harness import tasks
+from anvyl import tasks
 
 
 def test_toy_solution_verifies():

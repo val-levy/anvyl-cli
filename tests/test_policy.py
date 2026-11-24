@@ -1,8 +1,8 @@
 """Policy core + judge tests: the attempt gate, the stripper, the judge,
 plugin gating, and level auto-drop. All pure functions, no model."""
 
-from harness import policy
-from harness.judge import judge_check
+from anvyl import policy
+from anvyl.judge import judge_check
 
 
 def _state(**over):

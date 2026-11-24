@@ -6,8 +6,8 @@ through HARNESS_OPENROUTER_HELPER pointing at a stub script.
 
 import stat
 
-from harness import tasks as tasks_mod
-from harness.coach import Coach
+from anvyl import tasks as tasks_mod
+from anvyl.coach import Coach
 
 
 def _state(**over):

@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "human-loop-harness"
+name = "anvyl-cli"
 version = "0.1.0"
-description = "Human-most-of-the-loop coding harness: the human drives, the AI navigates."
+description = "Human-most-of-the-loop coding coach: the human drives, the AI navigates."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -14,10 +14,11 @@ dependencies = [
     "langgraph==1.2.24",
     "langgraph-checkpoint-sqlite==3.1.3",
     "rich==15.0.0",
+    "keyring>=25,<27",
 ]
 
 [project.scripts]
-harness = "harness.cli:main"
+anvyl = "anvyl.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -30,7 +31,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-harness = ["data/**/*"]
+anvyl = ["data/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -45,7 +46,7 @@ select = ["E", "F", "I", "W"]
 # tasks.py holds long prose strings (quiz answers, hints, goal prompts)
 # that read worse split across lines; line length is not enforced there.
 [tool.ruff.lint.per-file-ignores]
-"src/harness/tasks.py" = ["E501"]
+"src/anvyl/tasks.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,4 +1,4 @@
-"""Rich CLI for the harness.
+"""Rich CLI for anvyl.
 
 Opencode style, per Val's direction: warm dark background (the terminal's
 own), JetBrains Mono, one blue accent, thin borders, no gradients, no
@@ -346,7 +346,7 @@ class Runner:
                 "live (Claude via OpenRouter)" if self.coach.live_requested else "offline/demo"
             )
             self.console.print(
-                f"harness v1  |  task: {self.task['title']}  |  "
+                f"anvyl  |  task: {self.task['title']}  |  "
                 f"coach: {coach_label}" + ("  |  demo mode" if self.demo else "")
             )
             self.top_bar(initial)
@@ -402,7 +402,7 @@ class Runner:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="harness", description="Human-most-of-the-loop harness v1")
+    p = argparse.ArgumentParser(prog="anvyl", description="Human-most-of-the-loop coding coach")
     p.add_argument(
         "--task",
         default=tasks.DEFAULT_TASK,
@@ -443,8 +443,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--data-dir",
         default=None,
         help=(
-            "data dir for sessions/checkpoints/skills/plugins "
-            "(default: $HARNESS_HOME or ~/.harness)"
+            "data dir for sessions/checkpoints/skills/plugins (default: $ANVYL_HOME or ~/.anvyl)"
         ),
     )
     return p

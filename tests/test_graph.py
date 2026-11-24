@@ -83,7 +83,7 @@ def test_wifi_task_runs_as_second_example(tmp_path):
 
 def test_low_ownership_drops_level(tmp_path):
     """Wrong explain-back answers -> ownership 0 -> level auto-drops to L1."""
-    from harness import tasks as tasks_mod
+    from anvyl import tasks as tasks_mod
 
     task = tasks_mod.get_task("toy-backoff")
 

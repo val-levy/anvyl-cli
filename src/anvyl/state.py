@@ -1,4 +1,4 @@
-"""Typed state for the harness graph.
+"""Typed state for the anvyl graph.
 
 Every field the graph reads or writes lives here, so a session can be
 replayed and audited from its saved JSON. Lists that grow over a run use

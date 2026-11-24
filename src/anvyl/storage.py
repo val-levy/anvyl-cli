@@ -1,15 +1,15 @@
-"""Storage: where the harness keeps its data.
+"""Storage: where anvyl keeps its data.
 
 No hardcoded paths. The data dir resolves as:
 
 1. an explicit ``--data-dir`` / constructor argument,
-2. the ``HARNESS_HOME`` environment variable,
-3. ``~/.harness``.
+2. the ``ANVYL_HOME`` environment variable,
+3. ``~/.anvyl``.
 
 Sessions land in ``<data>/sessions/`` as JSON, the LangGraph
 checkpointer lives at ``<data>/checkpoints.sqlite``, and user
 skills/plugins live in ``<data>/skills/`` and ``<data>/plugins/``.
-Bundled example skills/plugins ship inside the package (``harness/data/``)
+Bundled example skills/plugins ship inside the package (``anvyl/data/``)
 and are copied into a fresh data dir on first run, so a new install
 works with no manual setup.
 """
@@ -23,8 +23,8 @@ import time
 from importlib import resources
 from pathlib import Path
 
-ENV_VAR = "HARNESS_HOME"
-DEFAULT_DIRNAME = ".harness"
+ENV_VAR = "ANVYL_HOME"
+DEFAULT_DIRNAME = ".anvyl"
 
 
 def resolve_data_dir(explicit: str | Path | None = None) -> Path:
@@ -38,7 +38,7 @@ def resolve_data_dir(explicit: str | Path | None = None) -> Path:
 
 def bundled_data_dir() -> Path:
     """The read-only examples shipped inside the installed package."""
-    return Path(str(resources.files("harness") / "data"))
+    return Path(str(resources.files("anvyl") / "data"))
 
 
 def ensure_data_dir(data_dir: str | Path) -> Path:

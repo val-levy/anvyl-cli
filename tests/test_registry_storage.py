@@ -2,8 +2,8 @@
 
 import json
 
-from harness.registry import PluginRegistry, SkillRegistry
-from harness.storage import (
+from anvyl.registry import PluginRegistry, SkillRegistry
+from anvyl.storage import (
     bundled_data_dir,
     ensure_data_dir,
     resolve_data_dir,
@@ -19,7 +19,7 @@ def test_bundled_data_exists():
 
 
 def test_ensure_data_dir_seeds_examples(tmp_path):
-    data_dir = ensure_data_dir(tmp_path / "harness-home")
+    data_dir = ensure_data_dir(tmp_path / "anvyl-home")
     assert (data_dir / "skills" / "toy-backoff" / "SKILL.md").exists()
     assert (data_dir / "plugins" / "wifi-csi" / "manifest.json").exists()
     assert (data_dir / "sessions").is_dir()
@@ -28,10 +28,10 @@ def test_ensure_data_dir_seeds_examples(tmp_path):
 def test_resolve_data_dir_precedence(tmp_path, monkeypatch):
     explicit = tmp_path / "explicit"
     assert resolve_data_dir(explicit) == explicit
-    monkeypatch.setenv("HARNESS_HOME", str(tmp_path / "from-env"))
+    monkeypatch.setenv("ANVYL_HOME", str(tmp_path / "from-env"))
     assert resolve_data_dir() == tmp_path / "from-env"
-    monkeypatch.delenv("HARNESS_HOME")
-    assert resolve_data_dir().name == ".harness"
+    monkeypatch.delenv("ANVYL_HOME")
+    assert resolve_data_dir().name == ".anvyl"
 
 
 def test_plugin_registry_lists_and_gates(tmp_path):

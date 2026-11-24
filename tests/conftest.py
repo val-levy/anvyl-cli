@@ -12,11 +12,11 @@ from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 from langgraph.errors import GraphInterrupt  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
-from harness import tasks as tasks_mod  # noqa: E402
-from harness.cli import ScriptedProvider  # noqa: E402
-from harness.coach import Coach  # noqa: E402
-from harness.graph import build_graph, pending_interrupt  # noqa: E402
-from harness.state import initial_state  # noqa: E402
+from anvyl import tasks as tasks_mod  # noqa: E402
+from anvyl.cli import ScriptedProvider  # noqa: E402
+from anvyl.coach import Coach  # noqa: E402
+from anvyl.graph import build_graph, pending_interrupt  # noqa: E402
+from anvyl.state import initial_state  # noqa: E402
 
 
 def run_task(

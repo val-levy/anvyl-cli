@@ -1,4 +1,4 @@
-"""Entry point: python -m harness"""
+"""Entry point: python -m anvyl"""
 
 from .cli import main
 
