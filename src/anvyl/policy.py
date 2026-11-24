@@ -126,8 +126,8 @@ MIN_CONTAINMENT_WORDS = 3
 
 _WORD_RE = re.compile(r"\w+")
 _HIGH_STAKES_RE = re.compile(
-    r"\b(?:auth(?:enticat\w*|oriz\w*)?|login|password|token|payment|billing|invoice|"
-    r"migration|schema|encrypt\w*|secret|permission|security)s?\b",
+    r"(?<![A-Za-z0-9])(?:auth(?:enticat\w*|oriz\w*)?|login|password|token|payment|billing|invoice|"
+    r"migration|schema|encrypt\w*|secret|permission|security)s?(?![A-Za-z0-9])",
     re.IGNORECASE,
 )
 _HIGH_STAKES_PATHS = {"auth", "payment", "billing", "migrations", "security", "secrets"}

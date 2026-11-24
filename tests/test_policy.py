@@ -125,7 +125,7 @@ def test_explainback_required_rules():
 # -- real-ticket attempt floor, triage, level clamp ------------------------------
 def test_attempt_floor_rejects_junk():
     for junk in ("asdf asdf asdf asdf asdf", "idk", "", "   ", None):
-        ok, reason = policy.attempt_floor(junk)  # type: ignore[arg-type]
+        ok, reason = policy.attempt_floor(junk)
         assert ok is False
         assert reason
 
@@ -148,7 +148,7 @@ def test_high_stakes_from_ticket_words():
     assert policy.high_stakes("Fix the LOGIN redirect", []) is True
     assert policy.high_stakes("rotate API tokens", []) is True
     assert policy.high_stakes("Fix authentication bug", []) is True
-    assert policy.high_stakes(None, []) is False  # type: ignore[arg-type]
+    assert policy.high_stakes(None, []) is False
 
 
 def test_high_stakes_from_paths():
@@ -166,3 +166,28 @@ def test_routine_ticket_not_high_stakes():
 
 def test_clamp_real_level():
     assert [policy.clamp_real_level(n) for n in (-3, 0, 1, 2, 3, 4, 99)] == [0, 0, 1, 2, 2, 2, 2]
+
+
+def test_attempt_floor_rejects_dominant_repeated_word():
+    ok, reason = policy.attempt_floor("fix fix fix fix fix fix a b c")
+    assert ok is False
+    assert "one word" in reason.lower()
+
+
+def test_attempt_floor_short_ticket_skips_containment():
+    plan = "fix it by reading the config before the retry loop starts"
+    assert policy.attempt_floor(plan, "fix it")[0] is True
+    assert policy.attempt_floor(plan, "")[0] is True
+    assert policy.attempt_floor(plan, None)[0] is True
+
+
+def test_high_stakes_snake_case_and_false_positives():
+    for hit in (
+        "fix password_reset flow",
+        "auth_token expiry",
+        "rotate SECRET_KEY",
+        "login_handler crash",
+    ):
+        assert policy.high_stakes(hit, []) is True, hit
+    for miss in ("update the author bio", "secretary", "tokenize input", "authority check"):
+        assert policy.high_stakes(miss, []) is False, miss
