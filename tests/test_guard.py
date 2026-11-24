@@ -340,3 +340,83 @@ def test_redact_pwd_suffix_keys(text: str, secret: str) -> None:
 @pytest.mark.parametrize("code", ["pwd = os.getcwd()", "pwd = x", "pwd = 'x'", "pwd: here"])
 def test_redact_bare_lowercase_pwd_untouched(code: str) -> None:
     assert redact(code + "\n") == (code + "\n", 0)
+
+
+_SOURCE_NEGATIVES = [
+    "self.token = token",
+    "self.api_key = api_key",
+    "api_key = api_key",
+    "token = token",
+    "    password = password",
+    "password = user.password",
+    "token = auth.token",
+    "secret = settings.SECRET_KEY",
+    "token_type: str",
+    "  secret_key: SecretStr",
+    "password_hash = other_identifier",
+    "    password: str",
+    "  token: string;",
+    "token: string",
+    "    token: Token",
+    "token = ''",
+    "TOKEN_LIMIT = MAX",
+    "token = next_token()",
+    'secret = os.environ["SECRET"]',
+    'password = input("pw")',
+    "password: str",
+    "api_key: Optional[str] = None",
+    "max_tokens = 100",
+    "password?: string",
+]
+
+
+@pytest.mark.parametrize("path", ["x.py", "x.ts"])
+@pytest.mark.parametrize("line", _SOURCE_NEGATIVES)
+def test_redact_source_files_keep_code(path, line):
+    text = line + "\n"
+    assert redact(text, path) == (text, 0)
+
+
+@pytest.mark.parametrize(
+    "text,secret",
+    [
+        ('password = "hunter2"\n', "hunter2"),
+        ("API_KEY=abc123\n", "abc123"),
+        ("x = 'ghp_" + "a" * 36 + "'\n", "ghp_" + "a" * 36),
+        ("auth = f(Bearer abcdefghijklmnopqrstuv)\n", "abcdefghijklmnopqrstuv"),
+        ("-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----\n", "MIIabc"),
+        ('{"password": "x"}\n', '"x"'),
+    ],
+)
+def test_redact_source_files_still_catch_secrets(text, secret):
+    out, n = redact(text, "app.py")
+    assert secret not in out and n > 0
+
+
+_CONFIG_POSITIVES = [
+    ("password=hunter2\r\n", "hunter2"),
+    ("[db]\npassword = hunter2\n", "hunter2"),
+    ("Password = hunter2\n", "hunter2"),
+    ("db_password = hunter2\n", "hunter2"),
+    ("api-key = abc123\n", "abc123"),
+    ("client_secret: abc123\n", "abc123"),
+    ("db.password=hunter2\n", "hunter2"),
+    ("spring.datasource.password=hunter2\n", "hunter2"),
+    ("  - password: hunter2\n", "hunter2"),
+    ("password: 12345678\n", "12345678"),
+    ("SECRET=123456\n", "123456"),
+]
+
+
+@pytest.mark.parametrize(
+    "path", [".env", "app.ini", "config.yaml", "x.properties", "settings.toml", None]
+)
+@pytest.mark.parametrize("text,secret", _CONFIG_POSITIVES)
+def test_redact_config_files_broad_rule(path, text, secret):
+    out, n = redact(text, path)
+    assert secret not in out and n > 0
+
+
+@pytest.mark.parametrize("line", ["max_tokens: 1024\n", "token_count: 0\n", "debug: true\n"])
+def test_redact_config_token_numbers_stay(line):
+    assert redact(line, "config.yaml") == (line, 0)

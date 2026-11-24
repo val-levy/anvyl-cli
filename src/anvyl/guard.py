@@ -174,23 +174,69 @@ _REDACTIONS = [
     # quoted literal: keep the key, drop the value
     re.compile(
         r"""(?i)(\b""" + _KEY + r"""["']?""" + _SEP + r""")"""
-        r"""(?:"[^"\n]*"?|'[^'\n]*'?)"""  # to closing quote, or end of line
-    ),
-    # config-file style line (env, INI, properties, YAML): unquoted, not a number/bool/null
-    re.compile(
-        r"(?mi)(^[ \t]*(?:export[ \t]+|-[ \t]+)?" + _KEY + _SEP + ")"
-        r"(?!(?:\d[\d._]*|true|false|none|null)[ \t]*(?:\#.*)?\r?$)" + _VAL
+        r"""(?:"(?!")[^"\n]*"?|'(?!')[^'\n]*'?)"""  # non-empty, to closing quote or EOL
     ),
 ]
+# source code: only UPPER_SNAKE `KEY=val` / `export KEY=val` lines (no spaces around `=`)
+_ENV_LINE = re.compile(
+    r"(?m)(^[ \t]*(?:export[ \t]+)?((?i:[A-Z0-9_]{0,64}"
+    + _KW
+    + r"[A-Z0-9_]{0,64}|[A-Z0-9_]{0,64}_PWD|PWD)(?-i:(?<=[A-Z0-9_])))=)("
+    + _VAL
+    + ")"
+)
+# config-file style line (env, INI, properties, YAML): any unquoted value to end of line
+_CONFIG_LINE = re.compile(
+    r"(?mi)(^[ \t]*(?:export[ \t]+|-[ \t]+)?(" + _KEY + ")" + _SEP + ")(" + _VAL + ")"
+)
+_CONFIG_EXTS = {".ini", ".cfg", ".conf", ".properties", ".yaml", ".yml", ".toml", ".json", ".env"}
+_CONFIG_NAMES = {"credentials", ".netrc", ".pgpass"}
+
+
+def _is_config(path: str | None) -> bool:
+    if path is None:
+        return True  # unknown: privacy-safe default
+    name = PurePosixPath(path.replace("\\", "/")).name.lower()
+    p = PurePosixPath(name)
+    return (
+        name in _CONFIG_NAMES
+        or name.startswith(".env")
+        or p.suffix in _CONFIG_EXTS
+        or (name.startswith(".") and not p.suffix)  # .npmrc-style dotfiles
+    )
 
 
 def _sub(m: re.Match[str]) -> str:
     return (m.group(1) if m.re.groups else "") + "[redacted]"
 
 
-def redact(text: str) -> tuple[str, int]:
+def _sub_config(m: re.Match[str]) -> str:
+    key, val = m.group(2).lower(), m.group(3).lower()
+    if val in {"true", "false", "none", "null"} or val == key:
+        return m.group(0)
+    # numeric values are credentials (PINs) unless the key is only a token counter
+    if (
+        re.fullmatch(r"\d[\d._]*", val)
+        and "token" in key
+        and not re.search(r"password|passwd|pwd|secret|api[_-]?key|access[_-]?key", key)
+    ):
+        return m.group(0)
+    return m.group(1) + "[redacted]"
+
+
+def redact(text: str, path: str | None = None) -> tuple[str, int]:
     total = 0
     for pat in _REDACTIONS:
         text, n = pat.subn(_sub, text)
         total += n
+    hits: list[str] = []
+
+    def sub(m: re.Match[str]) -> str:
+        out = _sub_config(m)
+        if out != m.group(0):
+            hits.append(out)
+        return out
+
+    text = (_CONFIG_LINE if _is_config(path) else _ENV_LINE).sub(sub, text)
+    total += len(hits)
     return text, total
