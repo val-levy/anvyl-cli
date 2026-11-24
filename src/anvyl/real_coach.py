@@ -8,7 +8,6 @@ judging come from `state` in code. Nothing the model says can change them.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -22,7 +21,7 @@ MAX_ROUNDS = 6
 MAX_CALLS_PER_ROUND = 4
 MAX_REPLY_CHARS = 4000
 GREP_MAX_LINES = 50
-GREP_MAX_PATTERN = 100
+GREP_MAX_PATTERN = 200
 GREP_MAX_LINE = 200
 GREP_MAX_BYTES = 1_000_000
 LIST_MAX = 200
@@ -55,13 +54,11 @@ TOOLS: list[dict] = [
     ),
     _fn(
         "grep",
-        "Search project files with a simple regex (no repeated groups).",
+        "Search project files for literal text, case-insensitive.",
         {"pattern": {"type": "string"}},
         ["pattern"],
     ),
 ]
-
-_NESTED_REPEAT = re.compile(r"\)[*+{]|\\[1-9]")  # blocks (a+)+ style blowups and backrefs
 
 
 class RealCoach:
@@ -130,16 +127,10 @@ class RealCoach:
         return fence("file", text)
 
     def _grep(self, pattern: object) -> str:
-        if not isinstance(pattern, str) or not pattern or len(pattern) > GREP_MAX_PATTERN:
-            return "error: pattern must be a short string"
-        # ponytail: `re` has no timeout; rejecting repeated groups + 200-char lines bounds the
-        # work. Swap to a linear-time engine (re2) if richer patterns are ever needed.
-        if _NESTED_REPEAT.search(pattern):
-            return "error: repeated groups and backreferences are not supported"
-        try:
-            rx = re.compile(pattern)
-        except re.error:
-            return "error: invalid regex"
+        if not isinstance(pattern, str) or not pattern.strip() or len(pattern) > GREP_MAX_PATTERN:
+            return "error: pattern must be a non-empty short string"
+        # Literal substring match only: no regex is ever compiled, so no backtracking risk.
+        needle = pattern.lower()
         hits: list[str] = []
         budget = GREP_MAX_BYTES
         for rel in guard.list_files(self.root, self.profile):
@@ -155,7 +146,7 @@ class RealCoach:
             text = guard.redact(raw.decode("utf-8", "replace"), rel)[0]
             for n, line in enumerate(text.splitlines(), 1):
                 line = line[:GREP_MAX_LINE]
-                if rx.search(line):
+                if needle in line.lower():
                     hits.append(f"{rel}:{n}: {line}")
                     if len(hits) >= GREP_MAX_LINES:
                         break

@@ -95,8 +95,8 @@ def test_grep_is_redacted_capped_and_safe(tmp_path: Path):
     assert res.count("needle") <= 50 + 1 and ".env" not in res and "9999zzzz" not in res
 
 
-@pytest.mark.parametrize("pat", ["(", "(a+)+$", "x" * 500, None, ["a"], 5])
-def test_grep_bad_or_dangerous_pattern_is_tool_error(tmp_path: Path, pat):
+@pytest.mark.parametrize("pat", ["", "   ", "x" * 500, None, ["a"], 5])
+def test_grep_bad_pattern_is_tool_error(tmp_path: Path, pat):
     (tmp_path / "a.py").write_text("a" * 100 + "!\n")
     c, client = coach(tmp_path, [tc("grep", {"pattern": pat}), ChatResult("ok")])
     c.reply(STATE)
@@ -206,3 +206,21 @@ def test_model_error_propagates(tmp_path: Path):
     c, _ = coach(tmp_path, [ModelError("boom")])
     with pytest.raises(ModelError):
         c.reply(STATE)
+
+
+def test_grep_is_literal_case_insensitive_and_never_regex(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("abc\nxA.Cx\n")
+    c, client = coach(tmp_path, [tc("grep", {"pattern": "a.c"}), ChatResult("ok")])
+    c.reply(STATE)
+    res = tool_results(client)[0]
+    assert "a.txt:2" in res and "a.txt:1" not in res
+
+
+def test_grep_catastrophic_pattern_is_fast(tmp_path: Path):
+    import time
+
+    (tmp_path / "a.txt").write_text("a" * 60 + "\n" * 3)
+    c, client = coach(tmp_path, [tc("grep", {"pattern": "a*a*a*a*a*a*a*b"}), ChatResult("ok")])
+    t = time.monotonic()
+    c.reply(STATE)
+    assert time.monotonic() - t < 1 and "a.txt" not in tool_results(client)[0]
