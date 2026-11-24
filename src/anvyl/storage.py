@@ -23,6 +23,7 @@ import time
 from importlib import resources
 from pathlib import Path
 
+SCHEMA_VERSION = 2
 ENV_VAR = "ANVYL_HOME"
 DEFAULT_DIRNAME = ".anvyl"
 
@@ -68,7 +69,8 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
     sessions_dir_path.mkdir(parents=True, exist_ok=True)
     session_id = state.get("session_id", f"s-{int(time.time())}")
     path = sessions_dir_path / f"{session_id}.json"
-    record = {
+    record: dict = {
+        "schema_version": SCHEMA_VERSION,
         "session_id": session_id,
         "task_id": state.get("task_id"),
         "task_title": state.get("task_title"),
@@ -89,8 +91,6 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
         "explain_score": state.get("explain_score"),
         "gate_passed": state.get("gate_passed"),
         "gate_blocked": state.get("gate_blocked"),
-        "solution_code": state.get("solution_code"),
-        "verification": state.get("verification"),
         "live_model": state.get("live_model"),
         "started_at": state.get("started_at"),
         "finished_at": state.get("finished_at"),
@@ -98,5 +98,79 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
         "est_without_ai_s": state.get("est_without_ai_s"),
         "errors": state.get("errors", []),
     }
+    if state.get("real"):
+        for key in ("ticket", "profile", "folder", "questions", "answers", "feedback"):
+            record[key] = state.get(key)
+        record["real"] = True
+        record["files_read"] = state.get("files_read", [])
+        record["shown_snippets"] = state.get("shown_snippets", [])
+        changes = state.get("changes") or {}
+        record["changes"] = {k: changes.get(k, 0) for k in ("files", "added", "removed")}
+    else:
+        record["solution_code"] = state.get("solution_code")
+        record["verification"] = state.get("verification")
     path.write_text(json.dumps(record, indent=2, default=str))
     return path
+
+
+def _check_session_id(session_id: str) -> str:
+    if (
+        not session_id
+        or session_id in (".", "..")
+        or "/" in session_id
+        or "\\" in session_id
+        or "\0" in session_id
+        or Path(session_id).name != session_id
+    ):
+        raise ValueError(f"invalid session id: {session_id!r}")
+    return session_id
+
+
+def work_dir_for(data_dir: Path, session_id: str) -> Path:
+    return Path(data_dir) / "work" / _check_session_id(session_id)
+
+
+def save_diff(sessions_dir: Path, session_id: str, text: str) -> Path:
+    path = Path(sessions_dir) / f"{_check_session_id(session_id)}.diff"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+def cleanup_stale_work(data_dir: Path, max_age_days: int = 7) -> int:
+    """Remove direct-child work dirs untouched for max_age_days. Returns the count."""
+    work = Path(data_dir) / "work"
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    try:
+        children = list(work.iterdir())
+    except OSError:
+        return 0
+    for child in children:
+        try:
+            if child.is_symlink() or not child.is_dir():
+                continue
+            if child.stat().st_mtime < cutoff:
+                shutil.rmtree(child)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def reset_data(data_dir: Path) -> None:
+    """Delete the contents of data_dir (not the dir itself); refuses unsafe targets."""
+    raw = str(data_dir)
+    if raw in ("", "."):
+        raise ValueError("refusing to reset: empty path")
+    path = Path(data_dir)
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError(f"refusing to reset: not a real directory: {path}")
+    real = path.resolve()
+    if real == real.parent or real == Path.home().resolve():
+        raise ValueError(f"refusing to reset: {real}")
+    for child in path.iterdir():
+        if child.is_symlink() or not child.is_dir():
+            child.unlink()
+        else:
+            shutil.rmtree(child)

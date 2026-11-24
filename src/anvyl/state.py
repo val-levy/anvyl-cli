@@ -58,6 +58,19 @@ class HarnessState(TypedDict, total=False):
     rail_visible: bool
     errors: Annotated[list, add]
 
+    # Real-project sessions (stats and the user's own words only, never file contents)
+    ticket: str
+    profile: str
+    folder: str
+    work_dir: str
+    changes: dict  # keys: files, added, removed
+    questions: list
+    answers: list
+    feedback: list
+    shown_snippets: Annotated[list, add]
+    files_read: Annotated[list, add]
+    real: bool
+
 
 def initial_state(
     session_id: str,
@@ -107,4 +120,34 @@ def initial_state(
         demo=demo,
         rail_visible=True,
         errors=[],
+    )
+
+
+def initial_real_state(
+    session_id: str,
+    ticket: str,
+    folder: str,
+    profile: str,
+    mode: str,
+    level: int,
+    high_stakes: bool,
+    work_dir: str,
+) -> HarnessState:
+    """Starting state for a real-project session; the attempt gate starts closed."""
+    base = initial_state(
+        session_id, "real", ticket, ticket, mode=mode, level=level, high_stakes=high_stakes
+    )
+    return HarnessState(
+        **{**base, "gate_passed": False},
+        ticket=ticket,
+        profile=profile,
+        folder=folder,
+        work_dir=work_dir,
+        changes={"files": 0, "added": 0, "removed": 0},
+        questions=[],
+        answers=[],
+        feedback=[],
+        shown_snippets=[],
+        files_read=[],
+        real=True,
     )
