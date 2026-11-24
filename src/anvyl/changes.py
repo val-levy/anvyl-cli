@@ -30,7 +30,8 @@ def take_snapshot(root: Path, profile: Profile, work_dir: Path) -> None:
     for rel in list_files(root, profile):
         dest = base / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text("\n".join(_read(root / rel)) + "\n", encoding="utf-8")
+        lines = _read(root / rel)
+        dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 def _baseline(base: Path) -> set[str]:

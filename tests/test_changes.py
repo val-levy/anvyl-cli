@@ -116,3 +116,26 @@ def test_clear_snapshot_only_removes_base_and_is_noop_if_absent(tmp_path):
     (work / "keep.txt").write_text("k")
     clear_snapshot(work)
     assert not (work / "base").exists() and (work / "keep.txt").exists()
+
+
+def test_empty_file_no_edits_is_no_change(tmp_path):
+    root, work = _repo(tmp_path, {"e.py": "", "s.py": ""})
+    take_snapshot(root, P, work)
+    ch = compute_changes(root, P, work)
+    assert (ch.files, ch.added, ch.removed, ch.text) == ([], 0, 0, "")
+
+
+def test_empty_file_given_content_counts_only_added(tmp_path):
+    root, work = _repo(tmp_path, {"e.py": ""})
+    take_snapshot(root, P, work)
+    (root / "e.py").write_text("a\nb\n")
+    ch = compute_changes(root, P, work)
+    assert (ch.files, ch.added, ch.removed) == (["e.py"], 2, 0)
+
+
+def test_file_emptied_counts_only_removed(tmp_path):
+    root, work = _repo(tmp_path, {"e.py": "a\nb\n"})
+    take_snapshot(root, P, work)
+    (root / "e.py").write_text("")
+    ch = compute_changes(root, P, work)
+    assert (ch.files, ch.added, ch.removed) == (["e.py"], 0, 2)
