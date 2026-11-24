@@ -260,3 +260,59 @@ def test_cleanup_ignores_symlinked_work_dir(tmp_path):
     (data / "work").symlink_to(other)
     assert cleanup_stale_work(data) == 0
     assert (other / "old").exists()
+
+
+@pytest.mark.parametrize(
+    "leak",
+    [
+        "```python\nLEAK = 1",
+        "~~~\nLEAK = 1\n~~~",
+        "~~~\nLEAK = 1",
+        "    LEAK = compute()\n    return LEAK",
+        "use `LEAK_INLINE` here",
+        "def LEAK():\n    pass",
+    ],
+)
+def test_real_session_scrubs_all_free_text_fields(tmp_path, leak):
+    st = _real_state(
+        human_attempt=f"mine\n{leak}",
+        attempts=[leak],
+        answers=[leak],
+        feedback=[leak],
+        errors=[leak],
+        questions=[leak],
+        goal=leak,
+        ticket=leak,
+    )
+    text = save_session(st, tmp_path).read_text()
+    assert "LEAK" not in text
+
+
+def test_real_session_text_capped_and_non_str_dropped(tmp_path):
+    st = _real_state(
+        human_attempt=["line1", "line2"],
+        answers=["a" * 900, 5, ["x"]],
+        events=[f"e{i}" for i in range(80)],
+    )
+    record = json.loads(save_session(st, tmp_path).read_text())
+    assert record["human_attempt"] == ""
+    assert record["answers"] == ["a" * 500]
+    assert len(record["events"]) == 50
+
+
+def test_save_session_tolerates_none_and_validates_before_mkdir(tmp_path):
+    record = json.loads(
+        save_session({"session_id": "s", "real": True, "events": None}, tmp_path).read_text()
+    )
+    assert record["events"] == []
+    target = tmp_path / "nope"
+    with pytest.raises(ValueError):
+        save_session({"session_id": "../x"}, target)
+    assert not target.exists()
+
+
+def test_reset_data_relative_path_refused_for_being_relative(tmp_path, monkeypatch):
+    (tmp_path / "plain").mkdir()
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="absolute"):
+        reset_data(Path("plain"))

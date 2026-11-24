@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 from importlib import resources
 from pathlib import Path
 
-from .judge import CODE_FENCE_RE
+from .judge import CODE_LINE_RE
 
 SCHEMA_VERSION = 2
 ENV_VAR = "ANVYL_HOME"
@@ -68,8 +69,8 @@ def checkpoints_path(data_dir: str | Path) -> Path:
 def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
     """Save one finished (or blocked) run as JSON. Returns the path."""
     sessions_dir_path = Path(sessions_dir_path)
-    sessions_dir_path.mkdir(parents=True, exist_ok=True)
     session_id = _check_session_id(state.get("session_id", f"s-{int(time.time())}"))
+    sessions_dir_path.mkdir(parents=True, exist_ok=True)
     path = sessions_dir_path / f"{session_id}.json"
     record: dict = {
         "schema_version": SCHEMA_VERSION,
@@ -101,17 +102,17 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
         "errors": state.get("errors", []),
     }
     if state.get("real"):
-        for key in ("ticket", "profile", "folder", "questions", "answers", "feedback"):
+        for key in ("profile", "folder"):
             record[key] = state.get(key)
+        for key in ("ticket", "goal", "human_attempt"):
+            record[key] = _scrub_text(state.get(key))
+        for key in ("attempts", "questions", "answers", "feedback", "errors"):
+            record[key] = _scrub_list(state.get(key))
         record["real"] = True
-        record["files_read"] = state.get("files_read", [])
-        record["shown_snippets_count"] = len(state.get("shown_snippets", []))
-        record["human_attempt"] = _strip_code(state.get("human_attempt"))
-        record["attempts"] = [
-            _strip_code(a) for a in state.get("attempts", []) if isinstance(a, str)
-        ]
-        events = [_scrub_event(e) for e in state.get("events", [])]
-        record["events"] = [e for e in events if e is not None]
+        record["files_read"] = state.get("files_read") or []
+        record["shown_snippets_count"] = len(state.get("shown_snippets") or [])
+        events = [_scrub_event(e) for e in state.get("events") or []]
+        record["events"] = [e for e in events if e is not None][:50]
         changes = state.get("changes") or {}
         record["changes"] = {k: changes.get(k, 0) for k in ("files", "added", "removed")}
     else:
@@ -121,8 +122,24 @@ def save_session(state: dict, sessions_dir_path: str | Path) -> Path:
     return path
 
 
-def _strip_code(text: object) -> object:
-    return CODE_FENCE_RE.sub("[code removed]", text) if isinstance(text, str) else text
+_FENCE_RE = re.compile(r"(```|~~~).*?(\1|\Z)", re.DOTALL)
+_INLINE_RE = re.compile(r"`[^`]*`?")
+_INDENTED_RE = re.compile(r"^(\t| {4})")
+
+
+def _scrub_text(value: object) -> str:
+    """Best-effort removal of code from user free text (defense in depth), capped at 500."""
+    if not isinstance(value, str):
+        return ""
+    text = _INLINE_RE.sub("", _FENCE_RE.sub("", value))
+    lines = [
+        ln for ln in text.splitlines() if not (CODE_LINE_RE.match(ln) or _INDENTED_RE.match(ln))
+    ]
+    return "\n".join(lines)[:500]
+
+
+def _scrub_list(value: object) -> list[str]:
+    return [_scrub_text(v) for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
 def _scalar(v: object) -> bool:
