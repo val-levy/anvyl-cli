@@ -80,6 +80,15 @@ class FolderConfig:
     def set_keep_diffs(self, folder: Path, yes: bool) -> None:
         self._update(folder, keep_diffs=yes)
 
+    def model(self) -> str | None:
+        m = self._load().get("model")
+        return m if isinstance(m, str) and 0 < len(m) <= 100 else None
+
+    def set_model(self, model: str) -> None:
+        data = self._load()
+        data["model"] = model
+        self._save(data)
+
     def personal_notice_seen(self) -> bool:
         return self._load().get("personal_notice_seen") is True
 

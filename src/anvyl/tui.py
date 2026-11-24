@@ -46,6 +46,7 @@ COMMANDS = {
     "/help": "list commands",
     "/status": "show step, level, gate and usage",
     "/score": "show the last scorecard",
+    "/model": "pick a model (OpenRouter, with prices)",
     "/usage": "session time, tokens, files sent",
     "/clear": "clear the screen",
     "/plugin": "list | load | unload <id>",
@@ -104,7 +105,9 @@ def status_fragments(s: Session) -> FormattedText:
     v = s.view
     files, tokens = s.stats()
     gate = "passed" if v.get("gate_passed") else "locked"
+    model = str(getattr(getattr(s, "client", None), "model", "") or "")
     parts = [
+        *([model.split("/")[-1]] if model else []),
         s.profile.value,
         f"mode {v.get('mode', s.mode)}",
         f"L{v.get('level', s.level)}",

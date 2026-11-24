@@ -33,6 +33,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from . import guard, tui
+from . import models as modelcat
 from .auth import get_api_key
 from .changes import clear_snapshot
 from .driver import drive
@@ -258,6 +259,8 @@ class Session:
                 ui.clear()
             else:
                 self.console.clear()
+        elif cmd == "/model":
+            self.pick_model(" ".join(args))
         elif cmd == "/plugin":
             self.registry_cmd("plugin", self.plugins, args)
         elif cmd == "/skill":
@@ -303,6 +306,42 @@ class Session:
             self.say(f"{cmd} is only valid at a work prompt")
         else:
             self.say(f"unknown command {cmd} (try /help)")
+
+    def pick_model(self, query: str) -> None:
+        """/model [filter]: list OpenRouter models with $/M-token prices, pick by number or id.
+        Only tool-capable models are listed (the coach needs tools). Applies to the next call."""
+        cur = str(getattr(self.client, "model", "") or "")
+        with busy(self.console):
+            cat = [m for m in modelcat.fetch() if m.tools]
+        if not cat:
+            self.say("could not load the model list (offline?). Current: " + (cur or "?"), RED)
+            return
+        shown = modelcat.search(cat, query)
+        while True:
+            self.say(f"{len(shown)} of {len(cat)} models   (* = current)", MUTED)
+            if shown:
+                self.say(modelcat.HEADER, MUTED)
+            for i, m in enumerate(shown[:15], 1):
+                self.say(modelcat.row(i, m, cur))
+            if len(shown) > 15:
+                self.say(f"... {len(shown) - 15} more, type words to narrow", MUTED)
+            reply = self.ask("number, id, words to filter, Enter to cancel: ").strip()
+            if not reply:
+                return
+            chosen: modelcat.Model | None = None
+            if reply.isascii() and reply.isdigit() and 1 <= int(reply) <= min(15, len(shown)):
+                chosen = shown[int(reply) - 1]
+            else:
+                chosen = next((m for m in cat if m.id == reply), None)
+            if chosen:
+                if self.client is not None:
+                    self.client.model = chosen.id  # type: ignore[attr-defined]
+                self.cfg.set_model(chosen.id)
+                p = f"${modelcat.money(chosen.price_in).strip()} in / "
+                p += f"${modelcat.money(chosen.price_out).strip()} out per 1M tokens"
+                self.say(f"model -> {chosen.id}  ({p})")
+                return
+            shown = modelcat.search(cat, reply)
 
     def registry_cmd(self, kind: str, reg: PluginRegistry | SkillRegistry, args: list[str]) -> None:
         """/plugin and /skill list|load|unload <id>. Ids must be known ones; plugin loads go
@@ -484,7 +523,7 @@ def run_session(
         if not key:
             s.say(LOGIN_HINT, RED)
             return 1
-        s.client = OpenRouterClient(key)
+        s.client = OpenRouterClient(key, s.cfg.model())
 
     def loop() -> int:
         try:
