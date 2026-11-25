@@ -26,6 +26,7 @@ from . import changes as changes_mod
 from . import grader, guard, policy, tasks, tutor
 from .coach import Coach
 from .llm import ModelClient, ModelError
+from .memory import Memory
 from .profile import Profile
 from .real_coach import RealCoach
 from .state import HarnessState
@@ -318,6 +319,9 @@ def hash_lines(text: str) -> list[str]:
     ]
 
 
+PASS_OWNERSHIP = 0.66  # explain-back score at which the ideas in a ticket count as shown
+
+
 def build_real_graph(
     coach: RealCoach,
     client: ModelClient,
@@ -327,6 +331,7 @@ def build_real_graph(
     work_dir: Path,
     checkpointer,
     keep_diffs: bool = False,
+    memory: Memory | None = None,
 ) -> Any:
     """Graph for real tickets. Every node returns a Command, so there are no static edges.
 
@@ -681,6 +686,21 @@ def build_real_graph(
         }
         if keep_diffs:
             save_diff(sessions_dir, str(state.get("session_id")), red(diff_text()))
+        if (
+            memory is not None
+            and coach.can_read_files
+            and state.get("questions")
+            and float(state.get("ownership_score") or 0) >= PASS_OWNERSHIP
+        ):
+            try:  # best effort: remembering must never fail the ticket
+                found = tutor.extract_ideas(
+                    client, red(state.get("ticket") or ""), red(diff_text())
+                )
+            except ModelError:
+                found = []
+            for idea in found:
+                memory.record(idea["label"], idea["aspects"])
+            out["idea_labels"] = [i["label"] for i in found]
         changes_mod.clear_snapshot(work_dir)
         record = {**state, **out, "events": list(state.get("events", [])) + events}
         if not state.get("questions"):

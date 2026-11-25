@@ -44,6 +44,7 @@ from .grader import _clean
 from .graph import LOOP_STEPS, build_real_graph
 from .history import load_sessions, render_history
 from .llm import ModelClient, ModelError, OpenRouterClient
+from .memory import Memory
 from .policy import REAL_MAX_LEVEL, clamp_real_level
 from .profile import FolderConfig, Profile, effective_profile
 from .real_coach import RealCoach
@@ -79,22 +80,23 @@ HELP = "\n".join(f"{c:<11}{d}" for c, d in tui.COMMANDS.items())
 HOWTO = (
     "How this works (not a chat: you drive, the AI coaches):",
     "  1. Type one task for this folder, e.g. 'add retry to fetch'.",
-    "  2. Write your plan in a sentence or two. It can be wrong.",
-    "  3. The coach asks questions. Reply, or /hint for another.",
+    "  2. Say what done looks like, then how you would go about it. 'I don't know' is fine:",
+    "     the coach teaches you, it never locks you out.",
+    "  3. Name the very first small step. The coach reacts. Reply, or /hint for another.",
     "  4. You write the code in your editor, then type /done.",
     "  5. Answer three short questions about your change. That is your score.",
     "Type /help for commands, /mode ship to skip the plan and questions.",
 )
 HINTS = {
     "ticket": "Step 0: describe one task, e.g. add retry to fetch",
-    "tutor_goal": "First: what do you want to get done, and what does done look like?",
-    "tutor_step": "What is the very first small step? (one line)",
+    "tutor_goal": "Step 1 of 6: what do you want to get done?",
+    "tutor_step": "Step 3 of 6: the very first small step",
     "teach": "Try again in your own words, or say 'I don't know' and I will teach more",
-    "attempt": "Step 1 of 4: write your plan in a sentence or two (it can be wrong)",
-    "coach_next": "Step 2 of 4: answer the coach, or /hint for another question",
-    "work": "Step 3 of 4: edit your files in your editor, then type /done",
+    "attempt": "Step 2 of 6: how would you go about it? 'I don't know' is fine",
+    "coach_next": "Step 4 of 6: answer the coach, or /hint for another question",
+    "work": "Step 5 of 6: edit your files in your editor, then type /done",
     "review": "Reviewing your change: reply to continue",
-    "explain": "Step 4 of 4: answer in your own words",
+    "explain": "Step 6 of 6: answer in your own words",
 }
 PERSONAL_NOTICE = (
     "notice (personal profile): the model may read non-secret files in this folder. "
@@ -191,6 +193,7 @@ class Session:
         self.last_answer = ""
         self.harness: hs.Harness | None = None
         self.hint = ""  # dim text inside the empty input box: the next step
+        self.memory = Memory(data_dir, self.root)
         self.plugins = PluginRegistry(data_dir / "plugins")
         self.skills = SkillRegistry(data_dir / "skills")
 
@@ -300,6 +303,8 @@ class Session:
             self.registry_cmd("plugin", self.plugins, args)
         elif cmd == "/skill":
             self.registry_cmd("skill", self.skills, args)
+        elif cmd == "/memory":
+            self.memory_cmd(args)
         elif cmd == "/score":
             self.say("\n".join(self.score_lines) or "no scorecard yet")
         elif cmd == "/graph":
@@ -547,6 +552,8 @@ class Session:
         if st.get("questions"):
             lines.append(f"  explain     {float(st.get('explain_score', 0)):.0%}")
             lines.append(f"  ownership   {float(st.get('ownership_score', 0)):.0%}")
+        if st.get("idea_labels"):
+            lines.append(f"  learned     {', '.join(st['idea_labels'])}")
         lines += [
             f"  level       L{st.get('level', self.level)}",
             f"  profile     {self.profile.value}",
@@ -554,6 +561,19 @@ class Session:
             f"  tokens      {tokens}",
         ]
         return lines
+
+    def memory_cmd(self, args: list[str]) -> None:
+        if args[:1] == ["forget"] and len(args) > 1:
+            label = " ".join(args[1:])
+            self.say(f"forgot: {label}" if self.memory.forget(label) else f"not found: {label}")
+            return
+        ideas = self.memory.ideas()
+        if not ideas:
+            self.say("nothing remembered yet: ideas you show you can do are kept here", MUTED)
+        for i in ideas:
+            self.say(f"{i['label']} (x{i['reps']}, {', '.join(i['aspects'])})")
+        if ideas:
+            self.say("/memory forget <idea> removes one", MUTED)
 
     # -- one ticket --------------------------------------------------------------
     def answer(self, payload: dict) -> str:
@@ -576,10 +596,17 @@ class Session:
         marks = self.data_dir / "threads"
         marks.mkdir(parents=True, exist_ok=True)
         (marks / sid).touch()
+        key = self.memory.start_ticket(ticket)
+        outcome, labels = "unfinished", []
         try:
             h = self.harness
             coach = RealCoach(
-                self.client, self.root, self.profile, self.can_read, h.guidance if h else ""
+                self.client,
+                self.root,
+                self.profile,
+                self.can_read,
+                h.guidance if h else "",
+                self.memory.recap(ticket) if self.can_read else "",
             )
             graph = build_real_graph(
                 coach,
@@ -590,6 +617,7 @@ class Session:
                 work,
                 self.saver,
                 self.cfg.keep_diffs(self.root),
+                self.memory if self.can_read else None,
             )
             state0 = initial_real_state(
                 sid, ticket, str(self.root), self.profile.value, self.mode,
@@ -602,12 +630,17 @@ class Session:
             drive(
                 graph, state0, config, self.answer, self.on_state, busy=lambda: busy(self.console)
             )
-            self.finish(graph.get_state(config).values)
+            final = graph.get_state(config).values
+            labels = list(final.get("idea_labels") or [])
+            if final.get("current_node") == "scorecard":
+                outcome = "abandoned" if final.get("abandoned") else "done"
+            self.finish(final)
         except (_Quit, KeyboardInterrupt):
             raise
         except Exception as exc:  # type name only: messages can echo ticket or file text
             self.say(f"error: the ticket failed ({type(exc).__name__}); nothing was scored", RED)
         finally:
+            self.memory.finish_ticket(key, outcome, labels)
             self.view = {}
             clear_snapshot(work)
             _forget_thread(self.saver, self.data_dir, sid)
@@ -685,6 +718,8 @@ def run_session(
                 s.setup_folder()
                 for ln in HOWTO:
                     s.say(ln, MUTED)
+                if last := s.memory.last_line():
+                    s.say(last, MUTED)
                 while True:
                     s.hint = HINTS["ticket"]
                     if ticket := s.ask("ticket> "):

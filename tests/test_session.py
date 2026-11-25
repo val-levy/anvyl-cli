@@ -26,11 +26,14 @@ GATE_OK = ChatResult('{"genuine": true, "reason": "ok"}')
 COACH = ChatResult("What happens when the first call fails?", [], 7)
 QS = ChatResult(json.dumps({"questions": ["What does it do?", "Why?", "What could break?"]}))
 GOOD = ChatResult(json.dumps({"results": [{"correct": True, "feedback": "fine"}] * 3}))
+EXTRACT = ChatResult(
+    json.dumps({"ideas": [{"label": "retry with backoff", "aspects": ["happy", "edge"]}]})
+)
 ANSWERS = ["it retries the call three times"] * 3
 
 
 def ticket_script(client_extra=()):
-    return [GATE_OK, COACH, QS, GOOD, *client_extra]
+    return [GATE_OK, COACH, QS, GOOD, EXTRACT, *client_extra]
 
 
 def reader(items, prompts=None):
@@ -172,7 +175,7 @@ def test_consent_refused_runs_ticket_only_and_sends_no_file_content(tmp_path):
 
 def test_consent_given_offers_file_tools(tmp_path):
     root, data = prep(tmp_path, consent=True)
-    client = FakeClient([GATE_OK, COACH, QS, GOOD])
+    client = FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT])
     go(root, data, one_ticket(root), client=client)
     assert any(tools for _m, tools in client.calls)
 

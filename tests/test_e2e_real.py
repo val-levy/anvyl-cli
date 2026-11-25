@@ -10,6 +10,7 @@ from test_session import (
     ANSWERS,
     ATTEMPT,
     COACH,
+    EXTRACT,
     GATE_OK,
     GOAL,
     GOOD,
@@ -98,7 +99,7 @@ def test_e2e_read_file_tool_result_never_persists(tmp_path):
 
 def test_e2e_personal_non_git_folder_full_loop(tmp_path):
     root, data = prep(tmp_path, profile=Profile.PERSONAL)
-    r = go(root, data, one_ticket(root), client=FakeClient([GATE_OK, COACH, QS, GOOD]))
+    r = go(root, data, one_ticket(root), client=FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT]))
     assert r.rc == 0
     assert "+2 -0" in r.out and "ownership" in r.out and "personal" in r.out
     assert not any((data / "work").glob("*/base"))
@@ -124,7 +125,7 @@ def test_e2e_git_repo_midsession_commit_does_not_change_counts(tmp_path):
         return "/done"
 
     items = ["Add retry to fetch", GOAL, ATTEMPT, STEP, "g", edit_then_commit, *ANSWERS]
-    r = go(root, data, items, client=FakeClient([GATE_OK, COACH, QS, GOOD]))
+    r = go(root, data, items, client=FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT]))
     assert r.rc == 0
     assert "+2 -0" in r.out and "1 files" in r.out
 

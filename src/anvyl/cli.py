@@ -38,6 +38,7 @@ from .coach import Coach
 from .driver import drive
 from .graph import LOOP_STEPS, build_graph
 from .history import load_sessions, render_history
+from .memory import Memory
 from .registry import PluginRegistry, SkillRegistry
 from .session import preview, run_session
 from .state import HarnessState, initial_state
@@ -375,7 +376,17 @@ class Runner:
             return result
 
 
-SUBCOMMANDS = ("session", "tutorial", "login", "logout", "preview", "reset", "history", "harness")
+SUBCOMMANDS = (
+    "session",
+    "tutorial",
+    "login",
+    "logout",
+    "preview",
+    "reset",
+    "history",
+    "harness",
+    "memory",
+)
 # The old top-level tutorial flags stay accepted (hidden) and mean `anvyl tutorial ...`.
 LEGACY_FLAGS = {
     "--task",
@@ -416,6 +427,9 @@ def build_parser() -> argparse.ArgumentParser:
     h = add("harness", "author sub-harnesses: init <id> | validate <dir> | pack <dir>")
     h.add_argument("action", choices=["init", "validate", "pack"])
     h.add_argument("target", help="harness id (init) or bundle folder (validate, pack)")
+    add("memory", "print what anvyl remembers about this folder as JSON").add_argument(
+        "action", choices=["export"]
+    )
     t = add("tutorial", "run the built-in tutorial tasks")
     t.add_argument(
         "--task",
@@ -576,6 +590,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "harness":
         return run_harness(args, console)
+    if args.cmd == "memory":
+        print(json.dumps(Memory(data_dir, Path.cwd()).export(), indent=2))
+        return 0
     if args.cmd == "preview":
         preview(Path.cwd(), data_dir, console, " ".join(args.ticket))
         return 0
