@@ -24,6 +24,8 @@ cd your-project
 anvyl               # then type /login and paste your OpenRouter API key
 ```
 
+`/login` stores your key in the OS keychain (the input is masked) and `/logout` removes it.
+
 For development: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`.
 
 ## A session
