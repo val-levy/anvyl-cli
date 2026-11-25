@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/LangGraph-state%20machine-1C3C3C" alt="LangGraph">
   <img src="https://img.shields.io/badge/SQLite-checkpoints-003B57?logo=sqlite&logoColor=white" alt="SQLite">
-  <img src="https://img.shields.io/badge/OpenRouter-Claude-6467F2" alt="OpenRouter">
+  <img src="https://img.shields.io/badge/Model%20API-OpenRouter-6467F2" alt="Model API: OpenRouter">
   <img src="https://img.shields.io/badge/UI-Rich%20%2B%20prompt__toolkit-E8A33D" alt="Rich and prompt_toolkit">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
 </p>
