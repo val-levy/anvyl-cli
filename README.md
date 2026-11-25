@@ -1,4 +1,10 @@
-# Anvyl
+```
+ ███   █   █  █   █  █   █  █    
+█   █  ██  █  █   █   █ █   █    
+█████  █ █ █  █   █    █    █    
+█   █  █  ██   █ █     █    █    
+█   █  █   █    █      █    █████
+```
 
 **A coding tutor for your terminal. You drive, the AI teaches.**
 
