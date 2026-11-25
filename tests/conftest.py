@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 # Make the src layout importable whether or not the package is installed.
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 from langgraph.errors import GraphInterrupt  # noqa: E402

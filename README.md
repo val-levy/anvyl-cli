@@ -58,7 +58,7 @@ Real projects are capped at L2. If your ownership score drops below 0.5, Anvyl d
 A [LangGraph](https://github.com/langchain-ai/langgraph) state machine with SQLite checkpoints, so a ticket survives a closed terminal. Human input arrives through `interrupt()`; a deterministic policy core owns every gate. Models are reached through OpenRouter, and the default is `anthropic/claude-sonnet-4.5`.
 
 ```
-src/anvyl/
+anvyl/
   graph.py     the session graph: tutor, coach, implement, explain-back, scorecard
   tutor.py     tutor moves and idea extraction
   policy.py    gate, levels, code stripping (no LLM)
@@ -73,8 +73,8 @@ tests/          pytest
 
 ```bash
 pytest
-ruff check src tests
-mypy src/anvyl
+ruff check anvyl tests
+mypy anvyl
 ```
 
 ## License
