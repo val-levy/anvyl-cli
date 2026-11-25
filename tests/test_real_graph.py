@@ -54,7 +54,10 @@ def test_learn_flow_end_to_end(tmp_path):
     client = FakeClient([GATE_OK, COACH, QS, GOOD])
     run = run_real(tmp_path, client, answers())
     s = run.state
-    assert kinds(run) == ["attempt", "coach_next", "work"] + ["explain"] * 3
+    assert (
+        kinds(run)
+        == ["tutor_goal", "attempt", "tutor_step", "coach_next", "work"] + ["explain"] * 3
+    )
     assert s["gate_passed"] is True and s["ownership_score"] == 1.0
     assert s["changes"] == {"files": 1, "added": 2, "removed": 0}
     assert s["human_lines"] == 2 and s["ai_lines"] == 0
@@ -64,18 +67,10 @@ def test_learn_flow_end_to_end(tmp_path):
     assert not (run.work_dir / "base").exists()
 
 
-def test_junk_attempt_blocks_after_three_tries(tmp_path):
-    client = FakeClient([])
-    run = run_real(tmp_path, client, answers(attempt=["a", "b", "c"]))
-    assert kinds(run) == ["attempt"] * 3
-    assert run.state["gate_passed"] is False and run.state["gate_blocked"] is True
-    assert not client.calls
-
-
 def test_gate_model_error_surfaces_error_kind_and_retry_works(tmp_path):
     client = FakeClient([ModelError("boom sk-leak"), GATE_OK, COACH, QS, GOOD])
     run = run_real(tmp_path, client, answers())
-    assert kinds(run)[:3] == ["attempt", "error", "coach_next"]
+    assert kinds(run)[:4] == ["tutor_goal", "attempt", "error", "tutor_step"]
     err = run.payloads[1]
     assert "sk-leak" not in json.dumps(err) and "boom" not in json.dumps(err)
     assert run.state["gate_passed"] is True and run.state["ownership_score"] == 1.0
@@ -84,7 +79,7 @@ def test_gate_model_error_surfaces_error_kind_and_retry_works(tmp_path):
 def test_gate_model_error_then_quit_never_passes(tmp_path):
     client = FakeClient([ModelError("x")])
     run = run_real(tmp_path, client, answers(error="quit"))
-    assert kinds(run) == ["attempt", "error"]
+    assert kinds(run) == ["tutor_goal", "attempt", "error"]
     assert run.state["gate_passed"] is False and run.state.get("quit") is True
     assert not (run.sessions / "real-test.json").exists()
 
@@ -92,14 +87,14 @@ def test_gate_model_error_then_quit_never_passes(tmp_path):
 def test_coach_model_error_is_denial_not_pass(tmp_path):
     client = FakeClient([GATE_OK, ModelError("x")])
     run = run_real(tmp_path, client, answers(error="quit"))
-    assert kinds(run) == ["attempt", "error"]
+    assert kinds(run) == ["tutor_goal", "attempt", "tutor_step", "error"]
     assert run.state["current_node"] != "scorecard" and run.state["ownership_score"] == 0.0
 
 
 def test_zero_change_done_asks_continue_or_abandon(tmp_path):
     client = FakeClient([GATE_OK, COACH, QS, GOOD])
     run = run_real(tmp_path, client, answers(work=["/done", edit()]))
-    assert kinds(run)[2:6] == ["work", "nochange", "work", "explain"]
+    assert kinds(run)[4:8] == ["work", "nochange", "work", "explain"]
     assert run.state["changes"]["added"] == 2
 
 
@@ -166,7 +161,13 @@ def test_without_file_consent_no_diff_content_reaches_the_model(tmp_path):
         assert leak not in sent, f"{leak!r} is file content and must stay local"
     assert len(client.calls) == 2, "gate and coach only: no question or grading call"
     s = run.state
-    assert not s.get("questions") and kinds(run) == ["attempt", "coach_next", "work"]
+    assert not s.get("questions") and kinds(run) == [
+        "tutor_goal",
+        "attempt",
+        "tutor_step",
+        "coach_next",
+        "work",
+    ]
     assert s["current_node"] == "scorecard" and s["level"] == 1, "no explain-back auto-drop"
     assert (run.sessions / "real-test.json").exists(), "the record still saves"
 
@@ -187,7 +188,7 @@ def test_ai_lines_counted_from_shown_snippets(tmp_path):
     run = run_real(tmp_path, client, answers(work=typed), level=2)
     s = run.state
     assert s["ai_lines"] == 2 and s["human_lines"] == 1
-    assert "def f" in run.payloads[1]["text"], "L2 user still sees the snippet"
+    assert "def f" in run.payloads[3]["text"], "L2 user still sees the snippet"
     assert s["shown_snippets"] and all(len(h) == 64 for h in s["shown_snippets"])
     assert "return x" not in json.dumps(s, default=str)
 

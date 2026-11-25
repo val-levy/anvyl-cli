@@ -104,7 +104,14 @@ def run_real(
         session_id, ticket, str(root), "professional", mode, level, high_stakes, str(work_dir)
     )
     coach = RealCoach(client, root, Profile.PROFESSIONAL, can_read_files=can_read_files)
-    queues = {k: list(v) if isinstance(v, list) else [v] for k, v in answers.items()}
+    defaults = {
+        "tutor_goal": "Make fetch retry so a flaky network does not break it",
+        "tutor_step": "Wrap the call in a loop",
+        "teach": "I would loop and wait a bit between tries",
+    }
+    queues = {
+        k: list(v) if isinstance(v, list) else [v] for k, v in {**defaults, **answers}.items()
+    }
     payloads: list[dict] = []
 
     def answer(payload):

@@ -6,7 +6,20 @@ import subprocess
 import keyring
 import pytest
 from support import FakeClient
-from test_session import ANSWERS, ATTEMPT, COACH, GATE_OK, GOOD, QS, edit, go, one_ticket, prep
+from test_session import (
+    ANSWERS,
+    ATTEMPT,
+    COACH,
+    GATE_OK,
+    GOAL,
+    GOOD,
+    QS,
+    STEP,
+    edit,
+    go,
+    one_ticket,
+    prep,
+)
 
 from anvyl.llm import ChatResult, ModelError, ToolCall
 from anvyl.profile import Profile
@@ -55,7 +68,7 @@ def test_e2e_professional_leaves_no_code_anywhere(tmp_path):
 
     reply = f"Try something like:\n```python\n{planted}\n```"
     client = FakeClient([GATE_OK, ChatResult(reply), QS, GOOD])
-    items = ["/level 2", "Add retry", ATTEMPT, "g", add_planted_copy, *ANSWERS]
+    items = ["/level 2", "Add retry", GOAL, ATTEMPT, STEP, "g", add_planted_copy, *ANSWERS]
     r = go(root, data, items, client=client)
     assert r.rc == 0 and "scorecard" in r.out
     assert SENTINEL in r.out, "the user did see the snippet"
@@ -110,7 +123,7 @@ def test_e2e_git_repo_midsession_commit_does_not_change_counts(tmp_path):
         git(root, "commit", "-am", "mid-session")
         return "/done"
 
-    items = ["Add retry to fetch", ATTEMPT, "g", edit_then_commit, *ANSWERS]
+    items = ["Add retry to fetch", GOAL, ATTEMPT, STEP, "g", edit_then_commit, *ANSWERS]
     r = go(root, data, items, client=FakeClient([GATE_OK, COACH, QS, GOOD]))
     assert r.rc == 0
     assert "+2 -0" in r.out and "1 files" in r.out

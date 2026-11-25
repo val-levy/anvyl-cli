@@ -87,6 +87,9 @@ HOWTO = (
 )
 HINTS = {
     "ticket": "Step 0: describe one task, e.g. add retry to fetch",
+    "tutor_goal": "First: what do you want to get done, and what does done look like?",
+    "tutor_step": "What is the very first small step? (one line)",
+    "teach": "Try again in your own words, or say 'I don't know' and I will teach more",
     "attempt": "Step 1 of 4: write your plan in a sentence or two (it can be wrong)",
     "coach_next": "Step 2 of 4: answer the coach, or /hint for another question",
     "work": "Step 3 of 4: edit your files in your editor, then type /done",
@@ -556,7 +559,7 @@ class Session:
     def answer(self, payload: dict) -> str:
         kind = payload.get("kind")
         self.hint = HINTS.get(str(kind), "")
-        if kind == "coach_next":
+        if kind in ("coach_next", "teach"):
             label = "● " if self.console.is_terminal else "coach: "
             self.console.print(label, style=COACH, end="", markup=False, highlight=False)
             self.last_answer = _clean(str(payload.get("text", "")), 4000)

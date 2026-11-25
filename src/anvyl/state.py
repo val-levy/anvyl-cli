@@ -76,6 +76,14 @@ class HarnessState(TypedDict, total=False):
     gate_tries: int
     gate_reason: str
 
+    # Tutor flow (short labels only, never file contents)
+    tutor_stage: str  # "" | "teach" | "reattempt" | "approach" | "feedback"
+    goal_detail: str
+    approach: str
+    steps: list
+    teach_rounds: int
+    idea_labels: list
+
 
 def initial_state(
     session_id: str,
@@ -155,4 +163,10 @@ def initial_real_state(
         shown_snippets=[],
         files_read=[],
         real=True,
+        tutor_stage="",
+        goal_detail="",
+        approach="",
+        steps=[],
+        teach_rounds=0,
+        idea_labels=[],
     )

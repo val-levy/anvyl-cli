@@ -19,6 +19,8 @@ from anvyl.llm import ChatResult
 from anvyl.profile import FolderConfig, Profile
 from anvyl.session import open_checkpointer, run_session
 
+GOAL = "Make fetch retry so a flaky network does not break it"
+STEP = "Wrap the call in a loop"
 ATTEMPT = "I would wrap the fetch call in a loop that retries with a growing delay"
 GATE_OK = ChatResult('{"genuine": true, "reason": "ok"}')
 COACH = ChatResult("What happens when the first call fails?", [], 7)
@@ -79,7 +81,7 @@ def edit(root):
 
 
 def one_ticket(root, ticket="Add retry to fetch"):
-    return [ticket, ATTEMPT, "g", edit(root), *ANSWERS]
+    return [ticket, GOAL, ATTEMPT, STEP, "g", edit(root), *ANSWERS]
 
 
 def thread_rows(data):
@@ -273,10 +275,12 @@ def test_empty_folder_session_still_starts(tmp_path):
     assert r.rc == 0 and r.prompts and "Traceback" not in r.out
 
 
-def test_blocked_gate_reports_and_cleans_up(tmp_path):
+def test_unsure_attempts_never_block(tmp_path):
     root, data = prep(tmp_path)
-    r = go(root, data, ["Add retry", "no", "still no", "nope"])
-    assert "[locked]" in r.out and "blocked" in r.out
+    client = FakeClient([COACH, COACH, COACH])
+    r = go(root, data, ["Add retry", GOAL, "idk", "idk", "idk", STEP], client=client)
+    assert "[locked]" not in r.out and "blocked" not in r.out
+    assert len(client.calls) == 3  # two teaching replies, then feedback on the first step
     assert thread_rows(data) == 0
 
 
@@ -288,7 +292,11 @@ def test_model_text_is_never_parsed_as_commands_and_prints_as_plain_text(tmp_pat
     )
     client = FakeClient([GATE_OK, ChatResult(evil, [], 3)])
     r = go(
-        root, data, ["Add retry", ATTEMPT, "/status", "/quit"], client=client, force_terminal=True
+        root,
+        data,
+        ["Add retry", GOAL, ATTEMPT, STEP, "/status", "/quit"],
+        client=client,
+        force_terminal=True,
     )
     assert "[bold red]x[/]" in r.out and ":smile:" in r.out
     assert "\x1b[31m" not in r.out and "\x1b]0;" not in r.out and "\x07" not in r.out
