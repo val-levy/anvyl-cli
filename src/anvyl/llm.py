@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -19,6 +20,9 @@ DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 
 class ModelError(Exception):
     """Any model-call failure, with a plain message."""
+
+
+CANCEL = threading.Event()  # set by the UI (Esc): the call in flight is abandoned
 
 
 @dataclass
@@ -65,9 +69,7 @@ class OpenRouterClient:
         request.add_header("Accept", "application/json")
         request.add_header("Authorization", f"Bearer {self._api_key}")
         try:
-            opener = urllib.request.build_opener(_NoRedirect())
-            with opener.open(request, timeout=self.timeout) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
+            result = self._send(urllib.request.build_opener(_NoRedirect()), request)
             message = result["choices"][0]["message"]
             calls = []
             for c in message.get("tool_calls") or []:
@@ -88,9 +90,32 @@ class OpenRouterClient:
                 tool_calls=calls,
                 tokens=int((result.get("usage") or {}).get("total_tokens") or 0),
             )
+        except ModelError:
+            raise
         except Exception as exc:
             # Type name only: messages could echo request details.
             raise ModelError(f"model call failed ({type(exc).__name__})") from None
+
+    def _send(self, opener: urllib.request.OpenerDirector, request: urllib.request.Request) -> dict:
+        """The request runs in a helper thread so Esc (CANCEL) can abandon it at once."""
+        box: dict = {}
+
+        def go() -> None:
+            try:
+                with opener.open(request, timeout=self.timeout) as resp:
+                    box["ok"] = json.loads(resp.read().decode("utf-8"))
+            except BaseException as exc:
+                box["err"] = exc
+
+        t = threading.Thread(target=go, daemon=True)
+        t.start()
+        while t.is_alive():
+            t.join(0.1)
+            if CANCEL.is_set():
+                raise ModelError("cancelled")
+        if "err" in box:
+            raise box["err"]
+        return box["ok"]
 
 
 # C0/C1 controls (keeping \n, \t), zero-width/bidi/format chars, soft hyphen, tag characters.

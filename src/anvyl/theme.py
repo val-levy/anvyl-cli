@@ -14,8 +14,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from rich.align import Align
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -114,6 +113,43 @@ def bar_text(pct: float, width: int = 20) -> Text:
 
 
 GLYPHS = "·✢✳✶✻✽"
+# Busy glyph: 8x4 pixel art drawn with braille dots (4 cells wide): a hammer swings down onto
+# an anvil, the strike flashes, sparks fly. '#' = dot on.
+_ANVIL = ("........", "........", "...#####", "....###.")
+_HAMMER = {  # frame name -> hammer pixels in the top rows
+    "up": ("##......", "##......", ".#......", "#......."),
+    "mid": ("..##....", "..##....", ".#......", "#......."),
+    "hit": ("...##...", "..###...", ".#......", "#......."),
+}
+_SPARKS = ("......#.", ".....#.#", "........", "........")
+_FORGE = (  # (hammer, sparks?, colour role)
+    ("up", False, "accent"),
+    ("up", False, "accent"),
+    ("mid", False, "coach"),
+    ("hit", False, "coach"),
+    ("hit", True, "red"),
+    ("mid", True, "coach"),
+)
+_DOTS = ((1, 8), (2, 16), (4, 32), (64, 128))  # braille bit per (row, left/right pixel)
+
+
+def _braille(rows: list[str]) -> str:
+    return "".join(
+        chr(0x2800 + sum(_DOTS[r][c] for r in range(4) for c in (0, 1) if rows[r][x + c] == "#"))
+        for x in range(0, len(rows[0]), 2)
+    )
+
+
+def forge(el: float) -> tuple[str, str]:
+    """The hammer-and-anvil glyph at `el` seconds: (text, colour)."""
+    hammer, spark, role = _FORGE[int(el * 7) % len(_FORGE)]
+    rows = [
+        "".join("#" if "#" in px else "." for px in zip(*layers, strict=True))
+        for layers in zip(
+            _ANVIL, _HAMMER[hammer], _SPARKS if spark else ("........",) * 4, strict=True
+        )
+    ]
+    return _braille(rows), {"accent": ACCENT, "coach": COACH, "red": RED}[role]
 
 
 class _Spin:
@@ -126,7 +162,7 @@ class _Spin:
     def __rich_console__(self, console: Console, options: Any) -> Any:
         el = time.monotonic() - self.t0
         yield Text.assemble(
-            (GLYPHS[int(el * 8) % len(GLYPHS)] + " ", ACCENT),
+            (forge(el)[0] + " ", forge(el)[1]),
             (self.words[int(el // 4) % len(self.words)] + "… ", COACH),
             (f"({int(el)}s)", MUTED),
         )
@@ -187,41 +223,84 @@ def _lerp(stops: list[str], t: float) -> str:
     return "#" + "".join(f"{round(x + (y - x) * f):02x}" for x, y in zip(a, b, strict=True))
 
 
-def _frame(grid: list[str], resolved: int, glint: int, rng: random.Random) -> Text:
-    """Cells left of `resolved` show the gradient logo (bold near `glint`); the rest scramble."""
+Cell = tuple[str, str]  # (character, rich style)
+
+
+def _frame(
+    grid: list[str], resolved: int, glint: int, rng: random.Random
+) -> list[list[Cell | None]]:
+    """Cells left of `resolved` show the gradient logo (bold near `glint`); the rest scramble.
+    Blank logo cells are None so the background shows through."""
     width = len(grid[0])
     stops = [ACCENT, COACH, RED]
-    out = Text()
+    out: list[list[Cell | None]] = []
     for row in grid:
+        line: list[Cell | None] = []
         for x, ch in enumerate(row):
             if ch == " ":
-                out.append(" ")
+                line.append(None)
             elif x > resolved:
-                out.append(rng.choice("░▒▓▚▞"), style=MUTED)
+                line.append((rng.choice("░▒▓▚▞"), MUTED))
             elif x > resolved - 4 and resolved < width:
-                out.append(rng.choice("▒▓█"), style=f"bold {ACCENT}")
+                line.append((rng.choice("▒▓█"), f"bold {ACCENT}"))
             else:
                 style = _lerp(stops, x / width)
-                out.append(ch, style=f"bold {style}" if abs(x - glint) < 5 else style)
-        out.append("\n")
+                line.append((ch, f"bold {style}" if abs(x - glint) < 5 else style))
+        out.append(line)
     return out
 
 
+def _embers(
+    cols: int, rows: int, t: int, seeds: dict[int, tuple[float, float]]
+) -> list[list[Cell | None]]:
+    """Dim sparks rising through the window: a bright head with a cooling trail below it."""
+    cells: list[list[Cell | None]] = [[None] * cols for _ in range(rows)]
+    for c, (speed, phase) in seeds.items():
+        head = int(phase - t * speed) % (rows + 8)
+        for k, (glyph, colour) in enumerate((("•", ACCENT), ("∙", COACH), ("·", RED))):
+            if head + k < rows:
+                cells[head + k][c] = (glyph, f"dim {colour}")
+    return cells
+
+
 def intro(console: Console) -> None:
-    """Full-window splash (terminal only, ~2s): the logo resolves out of static, centered,
-    a glint sweeps across, the tagline appears; then the screen is handed back."""
+    """Full-window splash (terminal only, ~2s): embers drift up behind the logo as it resolves
+    out of static, a glint sweeps across, the tagline appears; then the screen is handed back."""
     if not console.is_terminal:
         return
     cols, rows = console.size
     sx = max(2, min((cols - 4) // 33, 6))
     sy = max(1, min(sx // 2, (rows - 6) // 5))
     grid = _grid(sx, sy)
-    width = len(grid[0])
+    width, height = len(grid[0]), len(grid)
     rng = random.Random()
+    seeds = {
+        c: (rng.uniform(0.3, 1.0), rng.uniform(0, rows + 8))
+        for c in range(cols)
+        if rng.random() < 0.1
+    }
+    top, left = max(0, (rows - height - 2) // 2), max(0, (cols - width) // 2)
+    tick = 0
 
     def show(live: Live, x: int, glint: int, tag: str = "") -> None:
-        body = Group(_frame(grid, x, glint, rng), Text(tag, style=MUTED, justify="center"))
-        live.update(Align.center(body, vertical="middle", height=rows))
+        nonlocal tick
+        tick += 1
+        canvas = _embers(cols, rows, tick, seeds)
+        for dy, line in enumerate(_frame(grid, x, glint, rng)):
+            for dx, cell in enumerate(line):
+                if cell and top + dy < rows and left + dx < cols:
+                    canvas[top + dy][left + dx] = cell
+        tag_row, tag_col = top + height + 1, max(0, (cols - len(tag)) // 2)
+        for i, ch in enumerate(tag):
+            if tag_row < rows and tag_col + i < cols:
+                canvas[tag_row][tag_col + i] = (ch, MUTED)
+        text = Text(no_wrap=True, overflow="crop")
+        for r, line in enumerate(canvas):
+            for cell in line:
+                text.append(*cell) if cell else text.append(" ")
+            if r < rows - 1:
+                text.append("\n")
+        live.update(text)
 
     with Live(console=console, screen=True, refresh_per_second=30) as live:
         for x in range(0, width + 4, max(2, width // 28)):
@@ -232,5 +311,6 @@ def intro(console: Console) -> None:
         for i, x in enumerate(range(-5, width + 6, step)):
             show(live, width, x, tagline[: (i + 1) * len(tagline) // 18])
             time.sleep(0.025)
-        show(live, width, -99, tagline)
-        time.sleep(0.5)
+        for _ in range(20):  # hold: embers keep drifting behind the finished logo
+            show(live, width, -99, tagline)
+            time.sleep(0.025)

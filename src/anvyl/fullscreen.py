@@ -10,6 +10,7 @@ history lives in memory only: nothing typed is written to disk here.
 from __future__ import annotations
 
 import queue
+import random
 import shutil
 import threading
 import time
@@ -43,8 +44,9 @@ from prompt_toolkit.utils import get_cwidth
 from rich.console import Console, ConsoleDimensions
 from rich.text import Text
 
+from . import llm
 from .grader import _clean
-from .theme import ACCENT, COACH, GLYPHS, MUTED, RED, SPIN_WORDS, USER_BG, _grid, _lerp
+from .theme import ACCENT, COACH, MUTED, RED, SPIN_WORDS, USER_BG, _embers, _grid, _lerp, forge
 from .tui import STYLE, SlashCompleter, status_fragments
 
 Frag = tuple[str, str]
@@ -226,6 +228,9 @@ class FullScreen:
         self.reading = False
         self.interrupted = False
         self.busy_since: float | None = None
+        self.busy_tokens0 = 0
+        self._ember_key: tuple[int, int] | None = None
+        self._ember_seeds: dict[int, tuple[float, float]] = {}
         self.q: queue.Queue[str | None] = queue.Queue()
         self.pending: list[str] = []
         self.menu: dict[str, Any] | None = None  # the open picker, if any
@@ -237,6 +242,12 @@ class FullScreen:
             completer=SlashCompleter(),
             complete_while_typing=True,
             multiline=True,
+        )
+        # highlight the first match as soon as the slash menu opens (text is not inserted)
+        self.input.on_completions_changed += lambda b: (
+            b.complete_state
+            and b.complete_state.complete_index is None
+            and b.complete_state.go_to_index(0)
         )
         self.app = self._build(input, output)
         session.console = self.console
@@ -272,20 +283,42 @@ class FullScreen:
 
     @contextmanager
     def busy(self) -> Iterator[None]:
+        llm.CANCEL.clear()
         self.busy_since = time.monotonic()
+        self.busy_tokens0 = self.s.stats()[1]
         try:
             yield
         finally:
+            el, used = time.monotonic() - self.busy_since, self._used()
             self.busy_since = None
+            if used:  # leave the cost of this prompt behind in the transcript
+                mark = forge(3 / 7 + 0.01)[0]
+                self.feed(f"\x1b[2m  {mark} {int(el)}s · {used:,} tokens\x1b[0m\n")
             self._redraw()
+
+    def interrupt(self) -> None:
+        """Esc while working: abandon the model call and pull queued messages back to edit."""
+        llm.CANCEL.set()
+        if self.pending:
+            queued = "\n".join(self.pending)
+            self.pending.clear()
+            self.input.text = (self.input.text + "\n" + queued).strip("\n")
+            self.input.cursor_position = len(self.input.text)
+        self.feed("\x1b[2m  interrupted\x1b[0m\n")
+        self._redraw()
+
+    def _used(self) -> int:
+        """Tokens spent on the current prompt (the total moves as each model step finishes)."""
+        return max(0, self.s.stats()[1] - self.busy_tokens0)
 
     # -- welcome screen: fills the empty space above a short transcript ----------------
     def welcome(self, width: int, pad: int) -> list[list[Frag]]:
-        """`pad` rows to draw above the transcript: the animated logo block, at the top."""
-        block: list[list[Frag]] = []
+        """`pad` rows to draw above the transcript: logo, start menu and a one-line how-to,
+        with embers drifting through the blank cells (never over text)."""
+        t = time.monotonic()
+        logo: list[list[Frag]] = []
         grid = _grid(2, 1)
         if width >= len(grid[0]) + 4:
-            t = time.monotonic()
             span = len(grid[0])
             glint = int(t * 24) % (span + 60) - 30  # a glint passes every few seconds
             for row in grid:
@@ -296,27 +329,61 @@ class FullScreen:
                         continue
                     hue = _lerp([ACCENT, COACH, RED], x / span)
                     line.append((f"bold fg:{hue}" if abs(x - glint) < 5 else f"fg:{hue}", ch))
-                block.append(line)
+                logo.append(line)
         else:
-            block.append([(f"bold fg:{ACCENT}", "✻ anvyl")])
+            logo.append([(f"bold fg:{ACCENT}", "✻ anvyl")])
+        dim = f"fg:{MUTED}"
         cwd = str(self.s.root)
-        tips = "/help for commands  ·  /done when finished  ·  /hint for the coach"
-        block += [
+        head: list[list[Frag]] = [
+            *logo,
             [],
-            [(f"fg:{MUTED}", "you drive, the AI navigates")],
+            [(dim, "you drive, the AI navigates")],
+            [(dim, cwd[-max(width - 10, 10) :])],
             [],
-            [(f"fg:{MUTED}", "cwd  "), ("", cwd[-max(width - 10, 10) :])],
-            [(f"fg:{MUTED}", tips[: max(width - 2, 10)])],
         ]
-        if len(block) + 2 > pad:
-            return [[] for _ in range(pad)]
+        last = self.s.memory.last_line() if hasattr(self.s, "memory") else ""
+        flow = "describe → plan → you code → /done → score"
+        tail: list[list[Frag]] = [[], [(dim, flow[: max(width - 2, 10)])]]
+        if last:
+            tail.insert(0, [(dim, last[: max(width - 2, 10)])])
         top = 1  # start at the top of the screen; messages grow upward from the input
+        block = head + tail
+        if len(block) + top + 1 > pad:  # short window: drop the last-session line
+            block = head + [[(dim, flow[: max(width - 2, 10)])]]
+        if len(block) + top + 1 > pad:
+            return [[] for _ in range(pad)]
         out: list[list[Frag]] = [[] for _ in range(top)]
         for line in block:
             w = sum(get_cwidth(c) for _, c in line)
             out.append(([("", " " * ((width - w) // 2))] if line else []) + line)
-        # characters are single cells here, so a row of (style, text) pairs merges cleanly
-        return [_unmerge(r) for r in out] + [[] for _ in range(pad - top - len(block))]
+        out += [[] for _ in range(pad - len(out))]
+        return self._overlay_embers(width, [_unmerge(r) for r in out], t)
+
+    def _overlay_embers(self, width: int, rows: list[list[Frag]], t: float) -> list[list[Frag]]:
+        """Overlay drifting sparks on blank cells outside each row's text span."""
+        key = (width, len(rows))
+        if self._ember_key != key:
+            rng = random.Random(7)
+            self._ember_seeds = {
+                c: (rng.uniform(0.3, 1.0), rng.uniform(0, len(rows) + 8))
+                for c in range(width)
+                if rng.random() < 0.08
+            }
+            self._ember_key = key
+        sparks = _embers(width, len(rows), int(t * 10), self._ember_seeds)
+        out: list[list[Frag]] = []
+        for y, row in enumerate(rows):
+            filled = [x for x, (_, c) in enumerate(row) if c.strip()]
+            lo, hi = (min(filled), max(filled)) if filled else (width, -1)
+            line = row + [("", " ")] * (width - len(row))
+            for x in range(width):
+                cell = sparks[y][x]
+                if cell and not lo - 1 <= x <= hi + 1 and not line[x][1].strip():
+                    glyph, style = cell
+                    colour = style.split()[-1]
+                    line[x] = (f"fg:{_lerp([MUTED, colour], 0.5)}", glyph)
+            out.append(line)
+        return out
 
     # -- input side ---------------------------------------------------------------
     def read(self, prompt: str) -> str | None:
@@ -362,9 +429,11 @@ class FullScreen:
         el = time.monotonic() - self.busy_since
         return FormattedText(
             [
-                ("class:spin.glyph", " " + GLYPHS[int(el * 8) % len(GLYPHS)] + " "),
+                ("", " "),
+                (f"fg:{forge(el)[1]}", forge(el)[0]),
+                ("", " "),
                 ("class:spin.word", self.words[int(el // 4) % len(self.words)] + "… "),
-                ("class:spin.time", f"({int(el)}s)"),
+                ("class:spin.time", f"({int(el)}s · {self._used():,} tokens)"),
             ]
         )
 
@@ -504,9 +573,43 @@ class FullScreen:
             if self.menu and event.data.isprintable():
                 self.menu["q"], self.menu["sel"] = self.menu["q"] + event.data, 0
 
+        @kb.add("backspace", filter=~open_)
+        def _(event: Any) -> None:
+            b = event.current_buffer
+            b.delete_before_cursor(1)
+            if b.text.startswith("/") and " " not in b.text:
+                b.start_completion()  # complete-while-typing only fires on insert, not delete
+
+        @kb.add("tab", filter=~open_)
+        def _(event: Any) -> None:
+            b = event.current_buffer
+            cs = b.complete_state
+            if (
+                cs
+                and cs.complete_index == 0
+                and b.document.text_before_cursor != cs.current_completion.text
+            ):
+                b.go_to_completion(0)  # first Tab accepts the highlighted match
+            elif cs:
+                b.complete_next()
+            else:
+                b.start_completion(select_first=True)
+
         @kb.add("enter", filter=~open_)
         def _(event: Any) -> None:
             self._submit()
+
+        working = Condition(lambda: self.busy_since is not None)
+
+        @kb.add("escape", filter=~open_ & working, eager=True)
+        def _(event: Any) -> None:
+            self.interrupt()
+
+        @kb.add("escape", filter=~open_ & ~working)
+        def _(event: Any) -> None:
+            if not self.input.text and (past := self.input.history.get_strings()):
+                self.input.text = past[-1]  # Esc on an empty prompt: edit your last message
+                self.input.cursor_position = len(self.input.text)
 
         @kb.add("escape", "enter")
         def _(event: Any) -> None:
@@ -531,7 +634,7 @@ class FullScreen:
             self.q.put(None)
             event.app.exit()
 
-        return Application(
+        app = Application(
             layout=Layout(FloatContainer(body, floats=[menu, picker]), focused_element=input_win),
             key_bindings=kb,
             style=STYLE,
@@ -542,6 +645,10 @@ class FullScreen:
             input=input,
             output=output,
         )
+        # a lone Esc otherwise waits ~0.5s (input) / 1s (bindings) in case it starts a sequence
+        app.ttimeoutlen = 0.02
+        app.timeoutlen = 0.3
+        return app
 
     # -- run ------------------------------------------------------------------------
     def run(self, body: Callable[[], int]) -> int:

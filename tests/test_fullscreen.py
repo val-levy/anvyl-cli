@@ -139,3 +139,106 @@ def test_next_step_hint_shows_in_empty_input_and_hides_when_typing():
         pipe.send_text("x")
         assert wait_for(lambda: not shown())
         ui.q.put(None)
+
+
+def test_esc_while_working_cancels_the_call_and_returns_queued_text_to_the_input():
+    from anvyl import llm
+
+    sess = SimpleNamespace(
+        root="/x/proj",
+        view={},
+        profile=Profile.PERSONAL,
+        mode="learn",
+        level=1,
+        stats=lambda: (0, 0),
+        memory=SimpleNamespace(last_line=lambda: ""),
+    )
+    with create_pipe_input() as pipe:
+        ui = FullScreen(sess, input=pipe, output=Out())
+        seen: dict = {}
+
+        def body():
+            with ui.busy():
+                seen["cancelled"] = wait_for(llm.CANCEL.is_set)
+            return 0
+
+        def drive():
+            wait_for(lambda: ui.busy_since is not None)
+            ui.pending.append("queued thought")
+            pipe.send_text("\x1b")
+            wait_for(lambda: ui.input.text)
+
+        threading.Thread(target=drive, daemon=True).start()
+        ui.run(body)
+    assert seen["cancelled"] and ui.input.text == "queued thought" and not ui.pending
+
+
+def test_esc_on_an_empty_prompt_recalls_the_last_message_and_arrows_stay_history():
+    sess = SimpleNamespace(
+        root="/x/proj",
+        view={},
+        profile=Profile.PERSONAL,
+        mode="learn",
+        level=1,
+        stats=lambda: (0, 0),
+        memory=SimpleNamespace(last_line=lambda: ""),
+    )
+    seen: dict = {}
+    with create_pipe_input() as pipe:
+        out = Out()
+        out.size = Size(rows=32, columns=100)
+        ui = FullScreen(sess, input=pipe, output=out)
+
+        def body():
+            seen["first"] = sess.read_line("ticket> ")
+            sess.read_line("ticket> ")
+            return 0
+
+        def drive():
+            wait_for(lambda: ui.reading)
+            pipe.send_text("add retry\r")
+            wait_for(lambda: ui.reading and not ui.input.text and "first" in seen)
+            time.sleep(0.2)
+            pipe.send_text("\x1b")
+            wait_for(lambda: ui.input.text)
+            seen["recalled"] = ui.input.text
+            ui.input.text = ""
+            pipe.send_text("\x1b[A")  # Up: history, not the welcome menu
+            wait_for(lambda: ui.input.text)
+            seen["up"] = ui.input.text
+            pipe.send_text("\r")
+
+        threading.Thread(target=drive, daemon=True).start()
+        ui.run(body)
+    assert seen["recalled"] == seen["up"] == "add retry"
+
+
+def test_cancel_abandons_a_slow_model_call_at_once():
+    import http.server
+
+    import pytest
+
+    from anvyl import llm
+
+    class Slow(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            time.sleep(3)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    old = llm.OPENROUTER_URL
+    llm.OPENROUTER_URL = f"http://127.0.0.1:{srv.server_port}/"
+    try:
+        llm.CANCEL.clear()
+        threading.Timer(0.3, llm.CANCEL.set).start()
+        t0 = time.time()
+        with pytest.raises(llm.ModelError, match="cancelled"):
+            llm.OpenRouterClient("k", "m").chat([{"role": "user", "content": "hi"}])
+        assert time.time() - t0 < 1.5
+    finally:
+        llm.CANCEL.clear()
+        llm.OPENROUTER_URL = old
+        srv.shutdown()

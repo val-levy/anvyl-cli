@@ -80,11 +80,14 @@ STYLE = Style.from_dict(
         "menu.title": f"bold {ACCENT}",
         "menu.sel": f"bold {ACCENT}",
         "menu.dim": MUTED,
-        "completion-menu": "bg:default",
-        "completion-menu.completion": f"bg:default {MUTED}",
-        "completion-menu.completion.current": f"bg:default bold {ACCENT}",
-        "completion-menu.meta.completion": f"bg:default {MUTED}",
-        "completion-menu.meta.completion.current": f"bg:default {MUTED}",
+        # opaque (not bg:default) so the welcome logo and messages never show through
+        "completion-menu": f"bg:{USER_BG}",
+        "completion-menu.completion": f"bg:{USER_BG} {MUTED}",
+        "completion-menu.completion.current": f"bg:{USER_BG} bold {ACCENT}",
+        "completion-menu.meta.completion": f"bg:{USER_BG} {MUTED}",
+        "completion-menu.meta.completion.current": f"bg:{USER_BG} {MUTED}",
+        "scrollbar.background": f"bg:{USER_BG}",
+        "scrollbar.button": f"bg:{MUTED}",
     }
 )
 
