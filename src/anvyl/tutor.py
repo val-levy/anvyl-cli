@@ -10,6 +10,23 @@ from .memory import ASPECTS, LABEL_CAP
 
 UNSURE = {"idk", "i dont know", "no idea", "not sure", "?", "help", "dunno"}
 MAX_IDEAS = 5
+MOVES = ("ask", "teach", "hint", "ready")
+
+
+def decide(client: ModelClient, ticket: str, said: list[str]) -> str:
+    """The tutor's next move. Anything outside MOVES (or a bad shape) counts as `ask`."""
+    data = _ask(
+        client,
+        "You are a coding tutor choosing your next move. ask: one question to learn what they "
+        "want or plan. teach: they are missing an idea, teach it. hint: nudge them. ready: they "
+        "have stated a workable approach in their own words. "
+        'Reply {"move": "ask"|"teach"|"hint"|"ready"}.\n'
+        + fence("ticket", ticket)
+        + "\n"
+        + fence("said", " | ".join(said)),
+    )
+    move = data.get("move")
+    return move if isinstance(move, str) and move in MOVES else "ask"
 
 
 def is_unsure(text: str) -> bool:

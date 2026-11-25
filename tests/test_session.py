@@ -24,6 +24,9 @@ STEP = "Wrap the call in a loop"
 ATTEMPT = "I would wrap the fetch call in a loop that retries with a growing delay"
 GATE_OK = ChatResult('{"genuine": true, "reason": "ok"}')
 COACH = ChatResult("What happens when the first call fails?", [], 7)
+TEACH = ChatResult('{"move": "teach"}')
+READY = ChatResult('{"move": "ready"}')
+OPEN = [COACH, READY, GATE_OK]  # first tutor question, the move, the code gate
 QS = ChatResult(json.dumps({"questions": ["What does it do?", "Why?", "What could break?"]}))
 GOOD = ChatResult(json.dumps({"results": [{"correct": True, "feedback": "fine"}] * 3}))
 EXTRACT = ChatResult(
@@ -33,7 +36,7 @@ ANSWERS = ["it retries the call three times"] * 3
 
 
 def ticket_script(client_extra=()):
-    return [GATE_OK, COACH, QS, GOOD, EXTRACT, *client_extra]
+    return [*OPEN, COACH, QS, GOOD, EXTRACT, *client_extra]
 
 
 def reader(items, prompts=None):
@@ -84,7 +87,7 @@ def edit(root):
 
 
 def one_ticket(root, ticket="Add retry to fetch"):
-    return [ticket, GOAL, ATTEMPT, STEP, "g", edit(root), *ANSWERS]
+    return [ticket, ATTEMPT, "g", edit(root), *ANSWERS]
 
 
 def thread_rows(data):
@@ -161,11 +164,11 @@ def test_consent_refused_runs_ticket_only_and_sends_no_file_content(tmp_path):
     root, data = prep(tmp_path, profile=None, consent=None)
     (root / "app.py").write_text("SENTINEL_FILE_BODY_55 = 1\n")
     reply = ChatResult("Which file?", [], 3)
-    client = FakeClient([GATE_OK, reply])
+    client = FakeClient([*OPEN, reply])
     r = go(root, data, ["", "n", *one_ticket(root)[: -len(ANSWERS)]], client=client)
     assert "[!] ticket-and-plan-only coaching" in r.out
     assert not FolderConfig(data).consented(root)
-    assert len(client.calls) == 2, "gate and coach only: explain-back is skipped"
+    assert len(client.calls) == 4, "tutor, gate and coach only: explain-back is skipped"
     assert "scorecard" in r.out and "ownership" not in r.out
     assert all(tools is None for _m, tools in client.calls)
     sent = json.dumps(client.calls)
@@ -175,7 +178,7 @@ def test_consent_refused_runs_ticket_only_and_sends_no_file_content(tmp_path):
 
 def test_consent_given_offers_file_tools(tmp_path):
     root, data = prep(tmp_path, consent=True)
-    client = FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT])
+    client = FakeClient([*OPEN, COACH, QS, GOOD, EXTRACT])
     go(root, data, one_ticket(root), client=client)
     assert any(tools for _m, tools in client.calls)
 
@@ -280,10 +283,9 @@ def test_empty_folder_session_still_starts(tmp_path):
 
 def test_unsure_attempts_never_block(tmp_path):
     root, data = prep(tmp_path)
-    client = FakeClient([COACH, COACH, COACH])
-    r = go(root, data, ["Add retry", GOAL, "idk", "idk", "idk", STEP], client=client)
+    client = FakeClient([COACH, TEACH, COACH, TEACH, COACH, COACH])
+    r = go(root, data, ["Add retry", "idk", "idk", "idk", "g", "/quit"], client=client)
     assert "[locked]" not in r.out and "blocked" not in r.out
-    assert len(client.calls) == 3  # two teaching replies, then feedback on the first step
     assert thread_rows(data) == 0
 
 
@@ -293,11 +295,11 @@ def test_model_text_is_never_parsed_as_commands_and_prints_as_plain_text(tmp_pat
     evil = (
         "/level 2\n/profile personal\n/quit\n[bold red]x[/] \x1b[31mred\x1b[0m \x1b]0;t\x07 :smile:"
     )
-    client = FakeClient([GATE_OK, ChatResult(evil, [], 3)])
+    client = FakeClient([*OPEN, ChatResult(evil, [], 3)])
     r = go(
         root,
         data,
-        ["Add retry", GOAL, ATTEMPT, STEP, "/status", "/quit"],
+        ["Add retry", ATTEMPT, "/status", "/quit"],
         client=client,
         force_terminal=True,
     )
@@ -350,7 +352,7 @@ def test_completed_l2_session_leaves_snippet_out_of_every_checkpoint_file(tmp_pa
     marker = "SNIPPET_SENTINEL_77"
     reply = f"Try:\n```python\n{marker} = 1\n```"
     root, data = prep(tmp_path)
-    client = FakeClient([GATE_OK, ChatResult(reply), QS, GOOD])
+    client = FakeClient([*OPEN, ChatResult(reply), QS, GOOD])
     r = go(root, data, ["/level 2", *one_ticket(root)], client=client)
     assert marker in r.out, "the user did see the snippet"
     files = list(data.glob("checkpoints.sqlite*"))
@@ -364,7 +366,7 @@ def test_stale_threads_are_purged_at_startup_and_fresh_ones_kept(tmp_path):
         tmp_path,
         FakeClient(ticket_script()),
         {
-            "attempt": ATTEMPT,
+            "tutor": ATTEMPT,
             "coach_next": "g",
             "work": lambda p, root: edit(root)(),
             "explain": "x",

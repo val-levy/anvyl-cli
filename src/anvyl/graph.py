@@ -299,7 +299,7 @@ def build_graph(task: dict, coach: Coach, sessions_dir, checkpointer) -> Any:
 
 
 # -- real-project sessions ---------------------------------------------------
-TEACH_MAX = 2  # teaching rounds before moving on; the learner is never locked out
+TUTOR_MAX_TURNS = 8  # tutor turns before moving on; the learner is never locked out
 FAULT = (
     "The model could not be used just now (unavailable or unusable reply). "
     "Nothing was scored. Type retry to try again, or quit to end without scoring."
@@ -389,82 +389,108 @@ def build_real_graph(
     def triage_node(state: HarnessState) -> Command:
         stakes = bool(state.get("high_stakes")) or policy.high_stakes(state.get("ticket"), [])
         return Command(
-            goto="implement" if state.get("mode") == "ship" else "goal_q",
+            goto="implement" if state.get("mode") == "ship" else "tutor",
             update={"high_stakes": stakes, "current_node": "triage"},
         )
 
-    def goal_q_node(state: HarnessState) -> Command:
-        goal = str(
+    def tutor_node(state: HarnessState) -> Command:
+        if faulted(state):
+            return quit_cmd(state)
+        log = list(state.get("tutor_log") or [])
+        ticket = red(state.get("ticket") or "")
+        move = str(state.get("tutor_force") or "")
+        if not move:
+            if not log:
+                move = "ask"
+            else:
+                try:
+                    move = tutor.decide(client, ticket, [red(x) for x in log])
+                except ModelError:
+                    return fail("tutor")
+        update: dict = {"fault": "", "tutor_force": "", "current_node": "tutor"}
+        if move == "ready":
+            if any(not tutor.is_unsure(x) for x in log):
+                return Command(goto="tutor_check", update=update)
+            move = "teach"  # nothing real to check yet
+        try:
+            result = coach.reply({**state, "tutor_stage": move})
+        except ModelError:
+            return fail("tutor")
+        outbox[str(state.get("session_id"))] = result["text"] or NO_COACH_L0
+        return Command(
+            goto="tutor_wait", update={**update, **reply_update(state, result), "tutor_move": move}
+        )
+
+    def tutor_wait_node(state: HarnessState) -> Command:
+        sid = str(state.get("session_id"))
+        text = outbox.get(sid, "")
+        if not text:  # resumed in a new process: the reply is gone, ask again
+            return Command(goto="tutor")
+        reply = str(
             interrupt(
                 {
-                    "kind": "tutor_goal",
-                    "prompt": "What are you trying to get done, and what does done look like?",
+                    "kind": "tutor",
+                    "move": state.get("tutor_move"),
+                    "text": text,
+                    "prompt": "Your turn. 'I don't know' is a fine answer: I will teach you.",
                 }
             )
             or ""
         ).strip()
-        return Command(
-            goto="attempt_gate",
-            update={"goal_detail": goal[:500], "tutor_stage": "approach", "current_node": "goal_q"},
-        )
+        outbox.pop(sid, None)
+        turns = int(state.get("tutor_turns", 0)) + 1
+        update: dict = {"tutor_turns": turns, "current_node": "tutor_wait"}
+        if reply:
+            update["tutor_log"] = [*list(state.get("tutor_log") or []), reply[:500]][-8:]
+        return Command(goto="tutor_check" if turns >= TUTOR_MAX_TURNS else "tutor", update=update)
 
-    def attempt_gate_node(state: HarnessState) -> Command:
+    def tutor_check_node(state: HarnessState) -> Command:
+        """The code gate: only the learner's own words can open it, never the model's say-so."""
         if faulted(state):
             return quit_cmd(state)
-        update: dict = {"fault": "", "current_node": "attempt_gate", "tutor_stage": "approach"}
-        if state.get("fault") or state.get("tutor_stage") == "reattempt":
-            attempt = state.get("human_attempt") or ""  # already asked: same attempt
-        else:
-            prompt = (
-                "How would you go about it? Any plan is fine, even a guess. "
-                "'I don't know' is a fine answer: I will teach you."
-            )
-            attempt = str(interrupt({"kind": "attempt", "prompt": prompt}) or "").strip()
-            update.update(human_attempt=attempt, attempts=[attempt] if attempt else [])
         ticket = state.get("ticket") or ""
-        ok = not tutor.is_unsure(attempt) and policy.attempt_floor(attempt, ticket)[0]
+        approach = " ".join(x for x in state.get("tutor_log") or [] if not tutor.is_unsure(x))[
+            -500:
+        ]
+        ok = bool(approach) and policy.attempt_floor(approach, ticket)[0]
         if ok:
             try:
-                ok = grader.check_attempt(client, red(ticket), red(attempt))[0]
+                ok = grader.check_attempt(client, red(ticket), red(approach))[0]
             except ModelError:
-                return Command(
-                    goto="attempt_gate", update={**update, **fault_update("attempt_gate")}
-                )
+                return fail("tutor_check")
+        update: dict = {"fault": "", "current_node": "tutor_check", "tutor_stage": "feedback"}
         if ok:
             return Command(
-                goto="first_step",
+                goto="coach",
                 update={
                     **update,
-                    "approach": attempt[:500],
+                    "approach": approach,
+                    "human_attempt": approach,
+                    "attempts": [approach],
                     "gate_passed": True,
                     "gate_blocked": False,
                     "events": ["approach accepted"],
                 },
             )
-        rounds = int(state.get("teach_rounds", 0)) + 1
-        update["teach_rounds"] = rounds
-        if rounds > TEACH_MAX:  # taught enough: move on, the code gate stays closed
+        if int(state.get("tutor_turns", 0)) >= TUTOR_MAX_TURNS:  # taught enough: gate stays closed
             return Command(
-                goto="first_step",
-                update={**update, "events": ["no usable approach after teaching; moving on"]},
+                goto="coach", update={**update, "events": ["no usable approach; moving on"]}
             )
-        return Command(
-            goto="coach",
-            update={**update, "tutor_stage": "teach", "events": [f"teaching round {rounds}"]},
-        )
+        return Command(goto="tutor", update={**update, "tutor_force": "teach"})
 
-    def first_step_node(state: HarnessState) -> Command:
-        step = str(
-            interrupt({"kind": "tutor_step", "prompt": "What is the very first small step?"}) or ""
-        ).strip()
-        return Command(
-            goto="coach",
-            update={
-                "steps": [*list(state.get("steps") or []), step[:120]] if step else [],
-                "tutor_stage": "feedback",
-                "current_node": "first_step",
-            },
-        )
+    def reply_update(state: HarnessState, result: dict) -> dict:
+        seen = list(state.get("files_read") or [])
+        return {
+            "fault": "",
+            "tokens": int(state.get("tokens", 0)) + result["tokens"],
+            "shown_snippets": [h for sn in result["snippets"] for h in hash_lines(sn)],
+            "files_read": [f for f in result["files_read"] if f not in seen],
+            "events": (
+                [f"policy stripped {result['stripped']} code item(s) from coach reply"]
+                if result["stripped"]
+                else []
+            ),
+        }
 
     def coach_node(state: HarnessState) -> Command:
         if faulted(state):
@@ -475,47 +501,14 @@ def build_real_graph(
         except ModelError:
             return fail("coach")
         outbox[str(state.get("session_id"))] = result["text"] or NO_COACH_L0
-        seen = list(state.get("files_read") or [])
         return Command(
-            goto="coach_wait",
-            update={
-                "fault": "",
-                "tokens": int(state.get("tokens", 0)) + result["tokens"],
-                "shown_snippets": [h for sn in result["snippets"] for h in hash_lines(sn)],
-                "files_read": [f for f in result["files_read"] if f not in seen],
-                "events": (
-                    [f"policy stripped {result['stripped']} code item(s) from coach reply"]
-                    if result["stripped"]
-                    else []
-                ),
-                "current_node": "coach",
-            },
+            goto="coach_wait", update={**reply_update(state, result), "current_node": "coach"}
         )
 
     def coach_wait_node(state: HarnessState) -> Command:
         text = outbox.get(str(state.get("session_id")), "")
         if not text:  # resumed in a new process: the reply is gone, ask again
             return Command(goto="coach")
-        if state.get("tutor_stage") == "teach":
-            again = str(
-                interrupt(
-                    {
-                        "kind": "teach",
-                        "text": text,
-                        "prompt": "Try again in your own words. 'I don't know' is still fine.",
-                    }
-                )
-                or ""
-            ).strip()
-            outbox.pop(str(state.get("session_id")), None)
-            return Command(
-                goto="attempt_gate",
-                update={
-                    "human_attempt": again,
-                    "attempts": [again] if again else [],
-                    "tutor_stage": "reattempt",
-                },
-            )
         choice = interrupt(
             {
                 "kind": "coach_next",
@@ -711,9 +704,9 @@ def build_real_graph(
     for name, fn in [
         ("ticket", ticket_node),
         ("triage", triage_node),
-        ("goal_q", goal_q_node),
-        ("attempt_gate", attempt_gate_node),
-        ("first_step", first_step_node),
+        ("tutor", tutor_node),
+        ("tutor_wait", tutor_wait_node),
+        ("tutor_check", tutor_check_node),
         ("coach", coach_node),
         ("coach_wait", coach_wait_node),
         ("implement", implement_node),

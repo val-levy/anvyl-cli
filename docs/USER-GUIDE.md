@@ -29,14 +29,12 @@ Your answers are remembered.
 The first thing you type is **a ticket**: one task you want to do, such as `add retry to fetch`. It is not a chat. Typing "hi" makes "hi" the ticket.
 
 1. **Ticket.** Describe the task in a sentence or two.
-2. **Goal.** What do you want to get done, and what does done look like?
-3. **Approach (Learn mode).** How would you go about it? Any plan is fine, even a guess. "I don't know" is a fine answer: the coach teaches you a little and asks again. You are never locked out. When you give a real approach, a code check marks the gate passed.
-4. **First step.** Name the very first small step. The coach reacts to it.
-5. **Coach.** The coach asks a question or gives a hint. Reply, or type `/hint` for another.
-6. **Implement.** You write the code in your editor. Anvyl is not editing your files.
-7. **`/done`.** Say you are finished. Anvyl looks at your diff.
-8. **Explain back.** Three short questions about your own change, graded by the model with a strict rubric. This is the ownership check. It only runs when file reading is allowed.
-9. **Scorecard.** Time with and without AI, percent of code you typed, ownership score, level history, and a "learned" line. Saved as JSON in `sessions/`. `/score` shows the last one.
+2. **Talk it through (Learn mode).** The tutor chooses each turn itself: ask a question, teach an idea, give a hint, or decide you are ready. Answer in your own words. "I don't know" is a fine answer: it teaches, you are never locked out. When you have stated a workable approach, a code check (never the model's say-so) marks the gate passed. After a few turns Anvyl moves on either way.
+3. **Coach.** The coach reacts to your approach. Reply, or type `/hint` for another question, then `g` when ready to code.
+4. **Implement.** You write the code in your editor. Anvyl is not editing your files.
+5. **`/done`.** Say you are finished. Anvyl looks at your diff.
+6. **Explain back.** Three short questions about your own change, graded by the model with a strict rubric. This is the ownership check. It only runs when file reading is allowed.
+7. **Scorecard.** Time with and without AI, percent of code you typed, ownership score, level history, and a "learned" line. Saved as JSON in `sessions/`. `/score` shows the last one.
 
 Ideas you showed you can do are remembered, so the coach builds on them next time. They are recorded only when explain-back runs and passes, and only when file reading is allowed. `/memory` lists them and `/memory forget <idea>` removes one.
 
@@ -107,7 +105,7 @@ Type `/` to open a filtered menu. Use ↑/↓ and Enter, or keep typing the name
 | Ctrl+D | Send end-of-input at an empty prompt. |
 | Ctrl+C | Quit. |
 
-The dim text inside the empty input box always names the next step, for example "Step 2 of 4: answer the coach, or /hint". Your messages sit on a darker band. If you type while the agent is busy, the message is shown dimmed as queued and is sent at the next chat prompt. The window resizes live.
+The dim text inside the empty input box always names the next step, for example "Answer the coach, or /hint for another question". Your messages sit on a darker band. If you type while the agent is busy, the message is shown dimmed as queued and is sent at the next chat prompt. The window resizes live.
 
 Typed text is never written to disk by the UI. Input history is in memory only. Set `ANVYL_INLINE=1` for plain inline output instead of full screen. This is also used automatically when stdin is not a terminal.
 

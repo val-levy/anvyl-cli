@@ -11,11 +11,9 @@ from test_session import (
     ATTEMPT,
     COACH,
     EXTRACT,
-    GATE_OK,
-    GOAL,
     GOOD,
+    OPEN,
     QS,
-    STEP,
     edit,
     go,
     one_ticket,
@@ -68,8 +66,8 @@ def test_e2e_professional_leaves_no_code_anywhere(tmp_path):
         return "/done"
 
     reply = f"Try something like:\n```python\n{planted}\n```"
-    client = FakeClient([GATE_OK, ChatResult(reply), QS, GOOD])
-    items = ["/level 2", "Add retry", GOAL, ATTEMPT, STEP, "g", add_planted_copy, *ANSWERS]
+    client = FakeClient([*OPEN, ChatResult(reply), QS, GOOD])
+    items = ["/level 2", "Add retry", ATTEMPT, "g", add_planted_copy, *ANSWERS]
     r = go(root, data, items, client=client)
     assert r.rc == 0 and "scorecard" in r.out
     assert SENTINEL in r.out, "the user did see the snippet"
@@ -84,11 +82,11 @@ def test_e2e_read_file_tool_result_never_persists(tmp_path):
     root, data = prep(tmp_path)
     (root / "app.py").write_text(f'{SENTINEL} = 1\nkey = "{AWS_KEY}"\n')
     call = ChatResult("", [ToolCall("t1", "read_file", {"path": "app.py"})])
-    client = FakeClient([GATE_OK, call, ChatResult("What happens on failure?"), QS, GOOD])
+    client = FakeClient([*OPEN, call, ChatResult("What happens on failure?"), QS, GOOD])
     answers = [f"it retries, see {TYPED} and {AWS_KEY}", *ANSWERS[1:]]
     r = go(root, data, [*one_ticket(root)[:-3], *answers], client=client)
     assert r.rc == 0 and "ownership" in r.out
-    tool_msgs = [m["content"] for m in client.calls[2][0] if m["role"] == "tool"]
+    tool_msgs = [m["content"] for m in client.calls[3][0] if m["role"] == "tool"]
     assert len(tool_msgs) == 1
     assert SENTINEL in tool_msgs[0], "control: file content reached the coach loop"
     assert AWS_KEY not in tool_msgs[0], "the key was redacted before the model saw it"
@@ -99,7 +97,7 @@ def test_e2e_read_file_tool_result_never_persists(tmp_path):
 
 def test_e2e_personal_non_git_folder_full_loop(tmp_path):
     root, data = prep(tmp_path, profile=Profile.PERSONAL)
-    r = go(root, data, one_ticket(root), client=FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT]))
+    r = go(root, data, one_ticket(root), client=FakeClient([*OPEN, COACH, QS, GOOD, EXTRACT]))
     assert r.rc == 0
     assert "+2 -0" in r.out and "ownership" in r.out and "personal" in r.out
     assert not any((data / "work").glob("*/base"))
@@ -124,15 +122,15 @@ def test_e2e_git_repo_midsession_commit_does_not_change_counts(tmp_path):
         git(root, "commit", "-am", "mid-session")
         return "/done"
 
-    items = ["Add retry to fetch", GOAL, ATTEMPT, STEP, "g", edit_then_commit, *ANSWERS]
-    r = go(root, data, items, client=FakeClient([GATE_OK, COACH, QS, GOOD, EXTRACT]))
+    items = ["Add retry to fetch", ATTEMPT, "g", edit_then_commit, *ANSWERS]
+    r = go(root, data, items, client=FakeClient([*OPEN, COACH, QS, GOOD, EXTRACT]))
     assert r.rc == 0
     assert "+2 -0" in r.out and "1 files" in r.out
 
 
 def test_e2e_model_outage_mid_session_is_resumable(tmp_path):
     root, data = prep(tmp_path)
-    client = FakeClient([GATE_OK, COACH, QS, ModelError("down"), GOOD])
+    client = FakeClient([*OPEN, COACH, QS, ModelError("down"), GOOD])
     items = [*one_ticket(root), "retry"]
     r = go(root, data, items, client=client)
     assert r.rc == 0 and "Nothing was scored" in r.out

@@ -80,23 +80,19 @@ HELP = "\n".join(f"{c:<11}{d}" for c, d in tui.COMMANDS.items())
 HOWTO = (
     "How this works (not a chat: you drive, the AI coaches):",
     "  1. Type one task for this folder, e.g. 'add retry to fetch'.",
-    "  2. Say what done looks like, then how you would go about it. 'I don't know' is fine:",
-    "     the coach teaches you, it never locks you out.",
-    "  3. Name the very first small step. The coach reacts. Reply, or /hint for another.",
-    "  4. You write the code in your editor, then type /done.",
-    "  5. Answer three short questions about your change. That is your score.",
+    "  2. Talk it through with the tutor: what you want and how you would go about it.",
+    "     'I don't know' is fine: it teaches you, it never locks you out.",
+    "  3. You write the code in your editor, then type /done.",
+    "  4. Answer three short questions about your change. That is your score.",
     "Type /help for commands, /mode ship to skip the plan and questions.",
 )
 HINTS = {
     "ticket": "Step 0: describe one task, e.g. add retry to fetch",
-    "tutor_goal": "Step 1 of 6: what do you want to get done?",
-    "tutor_step": "Step 3 of 6: the very first small step",
-    "teach": "Try again in your own words, or say 'I don't know' and I will teach more",
-    "attempt": "Step 2 of 6: how would you go about it? 'I don't know' is fine",
-    "coach_next": "Step 4 of 6: answer the coach, or /hint for another question",
-    "work": "Step 5 of 6: edit your files in your editor, then type /done",
+    "tutor": "Talking it through: answer in your own words. 'I don't know' is fine",
+    "coach_next": "Answer the coach, or /hint for another question. Type g when ready to code",
+    "work": "Edit your files in your editor, then type /done",
     "review": "Reviewing your change: reply to continue",
-    "explain": "Step 6 of 6: answer in your own words",
+    "explain": "Last part: answer in your own words",
 }
 PERSONAL_NOTICE = (
     "notice (personal profile): the model may read non-secret files in this folder. "
@@ -581,7 +577,7 @@ class Session:
     def answer(self, payload: dict) -> str:
         kind = payload.get("kind")
         self.hint = HINTS.get(str(kind), "")
-        if kind in ("coach_next", "teach"):
+        if kind in ("coach_next", "tutor"):
             label = "● " if self.console.is_terminal else "coach: "
             self.console.print(label, style=COACH, end="", markup=False, highlight=False)
             self.last_answer = _clean(str(payload.get("text", "")), 4000)
@@ -732,7 +728,7 @@ def run_session(
                         s.say(
                             "Got it. Ship mode: write the code, then /done."
                             if s.mode == "ship"
-                            else "Got it. Next: your plan, then the coach.",
+                            else "Got it. Next: we talk it through.",
                             MUTED,
                         )
                         s.run_ticket(ticket)

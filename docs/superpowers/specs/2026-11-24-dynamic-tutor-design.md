@@ -28,3 +28,6 @@ B. Keep the fixed nodes and let the model route between them: rejected, still st
 - State: `tutor_log` (learner messages, capped), `tutor_turns`, `tutor_force`. `approach` is set on
   a passed gate. Removed: `goal_detail`, `steps`, `teach_rounds`.
 - Interrupt kind `tutor` replaces `tutor_goal`, `attempt`, `tutor_step`, `teach`.
+
+
+Status: implemented (approach A: one `tutor` loop node, typed move, code-owned gate, `TUTOR_MAX_TURNS=8`).

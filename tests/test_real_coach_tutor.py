@@ -35,13 +35,17 @@ def test_stage_teach_asks_for_a_short_lesson():
     assert "Stage: teach" in user and "short lesson" in user
 
 
-def test_stage_feedback_reacts_to_approach_and_steps():
-    _, user = msgs(
-        coach(), tutor_stage="feedback", goal_detail="G1", approach="A1", steps=["S1", "S2"]
-    )
+def test_stage_feedback_reacts_to_approach_and_said():
+    _, user = msgs(coach(), tutor_stage="feedback", approach="A1", tutor_log=["S1", "S2"])
     assert "Stage: feedback" in user
-    for tag, val in (("goal", "G1"), ("approach", "A1"), ("steps", "S1 | S2")):
+    for tag, val in (("approach", "A1"), ("said", "S1 | S2")):
         assert tag in user and val in user
+
+
+def test_stage_ask_and_hint_exist():
+    for stage in ("ask", "hint"):
+        _, user = msgs(coach(), tutor_stage=stage)
+        assert f"Stage: {stage}" in user
 
 
 def test_known_is_in_user_message_and_system_says_dont_reteach():
