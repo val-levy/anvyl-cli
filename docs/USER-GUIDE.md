@@ -40,6 +40,8 @@ The first thing you type is **a ticket**: one task you want to do, such as `add 
 
 Ideas you showed you can do are remembered, so the coach builds on them next time. They are recorded only when explain-back runs and passes, and only when file reading is allowed. `/memory` lists them and `/memory forget <idea>` removes one.
 
+What is stored: short plain idea labels (at most 8 words, letters, digits and basic punctuation), counts, dates, and one short ticket line per folder so Anvyl can say "Last time you were working on...". Never code. Nothing is stored for a folder where file reading is refused. A hand-edited memory file is cleaned on load, and if memory cannot be written (disk full, read-only folder) Anvyl carries on without it. `anvyl memory export` prints it, `anvyl reset` deletes it.
+
 If your ownership score drops below 0.5, Anvyl drops you back to L1.
 
 ## Levels and modes
@@ -198,6 +200,7 @@ Anvyl is built so that text from your repo or from the model cannot change what 
 | ------- | --- |
 | `anvyl: command not found` | `pipx ensurepath`, then reopen the terminal. Or run `.venv/bin/anvyl`. |
 | No explain-back questions | Professional profile with file reading refused for this folder, or you are in ship mode. |
+| Memory seems empty | Ideas are recorded only after explain-back passes, and only where file reading is allowed. Check `/memory`. |
 | `/level 3` refused | Real projects cap at L2. |
 | Screen garbled after a crash | Run `reset` in the terminal. |
 | Need plain output | `ANVYL_INLINE=1 anvyl`. |
