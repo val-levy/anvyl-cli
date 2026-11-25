@@ -79,21 +79,13 @@ always require explain-back.
 You have to consciously turn the level up. If your ownership score
 drops below 0.5, anvyl drops you back to L1 automatically.
 
-## CLI
+## Documentation
 
-Rich-based, opencode style: one blue accent, thin borders, no gradients,
-no emoji. The top bar shows the task name and timer only — deliberately
-no `LEARN • L1 • COACH` badge. Mode, level, and the 1–6 loop live in the
-side rail, which auto-hides on narrow terminals (under 110 columns); a
-one-line ministrip carries the essentials while it is hidden.
+- [User guide](docs/USER-GUIDE.md): everything Anvyl can do, step by step.
+- [Sub-harnesses](docs/HARNESSES.md): create, install and publish your own presets.
+- [Dogfood guide](docs/DOGFOOD.md): manual checklist for real tickets.
 
-Slash commands (in interactive prompts, or as `/help`):
-
-```
-/mode ship|learn   /level 0-4   /status   /score   /graph
-/rail               /plugin list|load|unload|install <id>
-/skill list|load|unload <id>    /quit
-```
+Run `anvyl` in a project folder for a real session, or `anvyl tutorial` for the practice tasks below. Type `/help` for slash commands.
 
 ## Live coach (Claude via OpenRouter)
 
@@ -118,8 +110,7 @@ under `plugins/`, loaded with `/plugin load <id>`.
 
 The rule that matters: **plugins run inside the policy core**. A plugin
 cannot bypass the attempt gate, change your level, or write code at
-L0/L1 — whatever its manifest claims. Remote plugin fetching is a stub
-in V1; add a local folder with a `manifest.json` to install one.
+L0/L1 — whatever its manifest claims. Remote plugin fetching is not built yet; add a local folder with a `manifest.json` to install one.
 
 Bundled examples: skills `toy-backoff`, `wifi-csi`; plugins `wifi-csi`,
 `gh-review`.

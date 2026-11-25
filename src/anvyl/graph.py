@@ -397,8 +397,8 @@ def build_real_graph(
             attempt = state.get("human_attempt") or ""  # retry: same attempt, no new try
         else:
             prompt = state.get("gate_reason") or (
-                "[locked] attempt gate - AI cannot write code yet.\n"
-                "Write your attempt first: a plan in your own words. It can be wrong."
+                "Next: write your plan in a sentence or two, in your own words. It can be "
+                "wrong. The coach joins once you have tried."
             )
             attempt = str(interrupt({"kind": "attempt", "prompt": prompt}) or "").strip()
             tries += 1

@@ -37,6 +37,7 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.utils import get_cwidth
 from rich.console import Console, ConsoleDimensions
@@ -138,6 +139,18 @@ def _split_lines(raw: str) -> list[list[Frag]]:
                 lines.append([])
             lines[-1].extend((style, c) for c in piece)
     return lines
+
+
+class _Hint(Processor):
+    """Dim placeholder text shown inside the input while it is empty."""
+
+    def __init__(self, text: Callable[[], str]) -> None:
+        self.text = text
+
+    def apply_transformation(self, ti: TransformationInput) -> Transformation:
+        if ti.lineno == 0 and not ti.document.text and self.text():
+            return Transformation([*ti.fragments, ("class:queued", self.text())])
+        return Transformation(ti.fragments)
 
 
 class _Transcript(UIControl):
@@ -406,7 +419,9 @@ class FullScreen:
         tr = self.transcript
         tr.window = Window(tr, wrap_lines=False, always_hide_cursor=True)
         input_win = Window(
-            BufferControl(self.input),
+            BufferControl(
+                self.input, input_processors=[_Hint(lambda: getattr(self.s, "hint", ""))]
+            ),
             height=Dimension(min=1, max=8),
             wrap_lines=True,
             dont_extend_height=True,

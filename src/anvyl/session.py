@@ -77,10 +77,22 @@ RAIL_MIN_WIDTH = 110
 STALE_DAYS = 7
 HELP = "\n".join(f"{c:<11}{d}" for c, d in tui.COMMANDS.items())
 HOWTO = (
-    "How this works: tell me one task you want to do in this folder, e.g. "
-    "'add retry to fetch'. This is not a chat: I ask for your plan first, coach you, and the "
-    "AI only helps once you have tried. Type /help for commands."
+    "How this works (not a chat: you drive, the AI coaches):",
+    "  1. Type one task for this folder, e.g. 'add retry to fetch'.",
+    "  2. Write your plan in a sentence or two. It can be wrong.",
+    "  3. The coach asks questions. Reply, or /hint for another.",
+    "  4. You write the code in your editor, then type /done.",
+    "  5. Answer three short questions about your change. That is your score.",
+    "Type /help for commands, /mode ship to skip the plan and questions.",
 )
+HINTS = {
+    "ticket": "Step 0: describe one task, e.g. add retry to fetch",
+    "attempt": "Step 1 of 4: write your plan in a sentence or two (it can be wrong)",
+    "coach_next": "Step 2 of 4: answer the coach, or /hint for another question",
+    "work": "Step 3 of 4: edit your files in your editor, then type /done",
+    "review": "Reviewing your change: reply to continue",
+    "explain": "Step 4 of 4: answer in your own words",
+}
 PERSONAL_NOTICE = (
     "notice (personal profile): the model may read non-secret files in this folder. "
     "With /keepdiffs on, diffs of your changes are kept in your anvyl data dir. "
@@ -175,6 +187,7 @@ class Session:
         self.t0 = time.monotonic()
         self.last_answer = ""
         self.harness: hs.Harness | None = None
+        self.hint = ""  # dim text inside the empty input box: the next step
         self.plugins = PluginRegistry(data_dir / "plugins")
         self.skills = SkillRegistry(data_dir / "skills")
 
@@ -542,6 +555,7 @@ class Session:
     # -- one ticket --------------------------------------------------------------
     def answer(self, payload: dict) -> str:
         kind = payload.get("kind")
+        self.hint = HINTS.get(str(kind), "")
         if kind == "coach_next":
             label = "● " if self.console.is_terminal else "coach: "
             self.console.print(label, style=COACH, end="", markup=False, highlight=False)
@@ -666,16 +680,19 @@ def run_session(
                 else:
                     s.say(f"anvyl  |  {s.root.name}  |  /help for commands", ACCENT)
                 s.setup_folder()
-                s.say(HOWTO, MUTED, wrap=True)
+                for ln in HOWTO:
+                    s.say(ln, MUTED)
                 while True:
+                    s.hint = HINTS["ticket"]
                     if ticket := s.ask("ticket> "):
                         s.say(
-                            "Step 1: write your plan in a sentence or two (it can be wrong). "
-                            "The coach reacts, then you write the code yourself, then /done.",
+                            "Got it. Ship mode: write the code, then /done."
+                            if s.mode == "ship"
+                            else "Got it. Next: your plan, then the coach.",
                             MUTED,
-                            wrap=True,
                         )
                         s.run_ticket(ticket)
+                        s.hint = ""
         except _Quit:
             return 0
         except KeyboardInterrupt:

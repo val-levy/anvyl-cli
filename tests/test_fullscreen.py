@@ -113,3 +113,29 @@ def test_picker_filters_moves_and_returns_index():
         pipe.send_text("\x1b")  # Esc cancels
         assert wait_for(lambda: "esc" in got) and got["esc"] is None
         ui.q.put(None)
+
+
+def test_next_step_hint_shows_in_empty_input_and_hides_when_typing():
+    sess = SimpleNamespace(
+        root="/x",
+        view={},
+        profile=Profile.PERSONAL,
+        mode="learn",
+        level=1,
+        stats=lambda: (0, 0),
+        hint="Step 1 of 4: write your plan",
+    )
+    with create_pipe_input() as pipe:
+        ui = FullScreen(sess, input=pipe, output=Out())
+        threading.Thread(target=lambda: ui.run(lambda: ui.read("> ") and 0), daemon=True).start()
+
+        def shown() -> bool:
+            try:
+                return any("Step 1 of 4" in r for r in screen(ui))
+            except AttributeError:  # first frame not drawn yet
+                return False
+
+        assert wait_for(shown)
+        pipe.send_text("x")
+        assert wait_for(lambda: not shown())
+        ui.q.put(None)
