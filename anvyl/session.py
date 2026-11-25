@@ -17,6 +17,7 @@ file under <data>/threads/ is 7 days old.
 from __future__ import annotations
 
 import contextlib
+import getpass
 import os
 import shutil
 import sqlite3
@@ -225,7 +226,11 @@ class Session:
         if ui:
             ui.secret = True
         try:
-            key = (self.read_line("OpenRouter key (hidden): ") or "").strip()
+            if ui or not sys.stdin.isatty():
+                masked = " (hidden)" if ui else ""
+                key = (self.read_line(f"OpenRouter key{masked}: ") or "").strip()
+            else:  # inline terminal: getpass masks it and keeps it out of history
+                key = getpass.getpass("OpenRouter key (hidden): ").strip()
         finally:
             if ui:
                 ui.secret = False

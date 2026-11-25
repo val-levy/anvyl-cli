@@ -420,7 +420,8 @@ class FullScreen:
         text = self.input.text
         if not text.strip():
             return
-        self.input.append_to_history()
+        if not self.secret:  # a typed API key never enters input history
+            self.input.append_to_history()
         self.input.reset()
         if not self.reading:
             self.pending.append(text)  # queued: shown dimmed, sent at the next chat prompt
