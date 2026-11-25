@@ -38,7 +38,13 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl, UIContent, UIControl
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
+from prompt_toolkit.layout.processors import (
+    ConditionalProcessor,
+    PasswordProcessor,
+    Processor,
+    Transformation,
+    TransformationInput,
+)
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.utils import get_cwidth
 from rich.console import Console, ConsoleDimensions
@@ -226,6 +232,7 @@ class FullScreen:
         self.console = UIConsole(self)
         self.label = "❯ "
         self.reading = False
+        self.secret = False  # mask the input line while an API key is typed
         self.interrupted = False
         self.busy_since: float | None = None
         self.busy_tokens0 = 0
@@ -402,6 +409,7 @@ class FullScreen:
     def _echo(self, text: str) -> None:
         """Your message in the transcript: a full-width band, darker than the page."""
         self.console.print()
+        text = "•" * len(text) if self.secret else text
         for i, ln in enumerate(_clean(text, 4000).splitlines() or [""]):
             row = Text.assemble(("❯ " if i == 0 else "  ", f"bold {COACH}"), ln)
             row.pad_right(max(0, self.width - row.cell_len))
@@ -489,7 +497,11 @@ class FullScreen:
         tr.window = Window(tr, wrap_lines=False, always_hide_cursor=True)
         input_win = Window(
             BufferControl(
-                self.input, input_processors=[_Hint(lambda: getattr(self.s, "hint", ""))]
+                self.input,
+                input_processors=[
+                    ConditionalProcessor(PasswordProcessor(), Condition(lambda: self.secret)),
+                    _Hint(lambda: getattr(self.s, "hint", "")),
+                ],
             ),
             height=Dimension(min=1, max=8),
             wrap_lines=True,

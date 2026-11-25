@@ -37,7 +37,7 @@ from rich.text import Text
 from . import guard, tui, welcome
 from . import harness as hs
 from . import models as modelcat
-from .auth import get_api_key
+from .auth import delete_api_key, get_api_key, store_api_key
 from .changes import clear_snapshot
 from .driver import drive
 from .grader import _clean
@@ -70,7 +70,7 @@ from .theme import (
     typewrite,
 )
 
-LOGIN_HINT = 'not logged in: run "anvyl login"'
+LOGIN_HINT = "not logged in: type /login to add your OpenRouter API key"
 TICKET_ONLY = (
     "[!] ticket-and-plan-only coaching: the model sees only your ticket text and what you type"
 )
@@ -219,6 +219,26 @@ class Session:
                 return line.lower()
             self.command(line)
 
+    def login(self) -> None:
+        """Ask for the key with the input line masked, store it, and start using it."""
+        ui = getattr(self.console, "ui", None)
+        if ui:
+            ui.secret = True
+        try:
+            key = (self.read_line("OpenRouter key (hidden): ") or "").strip()
+        finally:
+            if ui:
+                ui.secret = False
+        if not key:
+            self.say("no key entered", MUTED)
+            return
+        where = store_api_key(key, self.data_dir)
+        self.client = OpenRouterClient(key, self.cfg.model())
+        self.say(
+            f"logged in (key in {'the OS keychain' if where == 'keychain' else 'a 0600 file'})",
+            MUTED,
+        )
+
     # -- folder setup ----------------------------------------------------------
     def setup_folder(self) -> None:
         profile = self.cfg.profile(self.root)
@@ -293,6 +313,12 @@ class Session:
                 self.copy(ui.plain(), "transcript")
             else:
                 self.copy(self.last_answer, "last coach answer")
+        elif cmd == "/login":
+            self.login()
+        elif cmd == "/logout":
+            delete_api_key(self.data_dir)
+            self.client = None
+            self.say("key removed (OS keychain and key file). /login to add one again", MUTED)
         elif cmd == "/model":
             self.pick_model(" ".join(args))
         elif cmd == "/plugin":
@@ -588,7 +614,10 @@ class Session:
         return self.ask("> ", graph_prompt=True)
 
     def run_ticket(self, ticket: str) -> None:
-        assert self.saver is not None and self.client is not None
+        if self.client is None:
+            self.say(LOGIN_HINT, RED)
+            return
+        assert self.saver is not None
         sid = f"r-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
         work = work_dir_for(self.data_dir, sid)
         marks = self.data_dir / "threads"
@@ -697,10 +726,8 @@ def run_session(
         s.read_line = tui.reader(s)
     if client is None:
         key = get_api_key(data_dir)
-        if not key:
-            s.say(LOGIN_HINT, RED)
-            return 1
-        s.client = OpenRouterClient(key, s.cfg.model())
+        if key:
+            s.client = OpenRouterClient(key, s.cfg.model())
 
     def loop() -> int:
         try:
@@ -720,6 +747,8 @@ def run_session(
                     welcome.mark_seen(data_dir)
                 for ln in HOWTO:
                     s.say(ln, MUTED)
+                if s.client is None:
+                    s.say(LOGIN_HINT, RED)
                 if last := s.memory.last_line():
                     s.say(last, MUTED)
                 while True:

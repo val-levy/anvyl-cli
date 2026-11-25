@@ -105,11 +105,35 @@ def no_real_keychain(monkeypatch):
 
 
 # -- startup ---------------------------------------------------------------------
-def test_no_key_prints_login_hint_and_returns_1(tmp_path):
+def test_no_key_starts_and_hints_at_login(tmp_path):
     root, data = prep(tmp_path)
     buf = io.StringIO()
     rc = run_session(root, data, Console(file=buf, width=100), None, reader([]))
-    assert rc == 1 and 'not logged in: run "anvyl login"' in buf.getvalue()
+    assert rc == 0 and "type /login" in buf.getvalue()
+
+
+def test_ticket_without_key_hints_instead_of_crashing(tmp_path):
+    root, data = prep(tmp_path)
+    buf = io.StringIO()
+    run_session(root, data, Console(file=buf, width=100), None, reader(["fix the bug"]))
+    assert buf.getvalue().count("type /login") == 2
+
+
+def test_login_and_logout_slash_commands(tmp_path, monkeypatch):
+    store = {}
+    monkeypatch.setattr(keyring, "set_password", lambda s, u, k: store.update(k=k))
+    monkeypatch.setattr(keyring, "delete_password", lambda s, u: store.pop("k", None))
+    root, data = prep(tmp_path)
+    buf = io.StringIO()
+    run_session(
+        root,
+        data,
+        Console(file=buf, width=100),
+        None,
+        reader(["/login", "sk-secret-123", "/logout"]),
+    )
+    assert "logged in" in buf.getvalue() and "key removed" in buf.getvalue()
+    assert "sk-secret-123" not in buf.getvalue() and "k" not in store
 
 
 def test_tutorial_works_without_key(tmp_path):

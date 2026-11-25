@@ -46,6 +46,8 @@ COMMANDS = {
     "/help": "list commands",
     "/status": "show step, level, gate and usage",
     "/score": "show the last scorecard",
+    "/login": "store your OpenRouter API key",
+    "/logout": "remove the stored API key",
     "/model": "pick a model (OpenRouter, with prices)",
     "/history": "your past sessions",
     "/copy": "copy last coach answer (/copy all: whole screen)",

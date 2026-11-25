@@ -10,12 +10,12 @@ Requires Python 3.12+.
 
 ```bash
 pipx install .                      # or: pip install -e ".[dev]" inside a venv
-anvyl login                         # paste your OpenRouter API key (not echoed)
 cd your-project
 anvyl                               # start a session in this folder
+# then type /login and paste your OpenRouter API key (shown as dots)
 ```
 
-The key is stored in the OS keychain (with a key-file fallback). `OPENROUTER_API_KEY` in the environment also works and takes priority. `anvyl logout` removes the stored key.
+The key is stored in the OS keychain (with a key-file fallback). `OPENROUTER_API_KEY` in the environment also works and takes priority. `/logout` (or `anvyl logout`) removes it. `anvyl login` still works outside a session.
 
 On first start in a folder, Anvyl asks three things, once:
 
@@ -76,6 +76,8 @@ Type `/` to open a filtered menu. Use ↑/↓ and Enter, or keep typing the name
 | `/level 0-2` | Coaching level. |
 | `/profile professional\|personal` | Switch profile. |
 | `/keepdiffs on\|off` | Personal profile only: keep diffs of your changes in the data dir. |
+| `/login` | Store your OpenRouter API key (input is masked). |
+| `/logout` | Remove the stored key. |
 | `/model [query]` | Browse and pick a model. |
 | `/history` | Your past sessions. |
 | `/copy` | Copy the last coach answer to the clipboard. |

@@ -20,9 +20,8 @@ Requires Python 3.12+.
 
 ```bash
 pipx install .      # or: uv tool install .
-anvyl login         # paste your OpenRouter API key (stored in the OS keychain)
 cd your-project
-anvyl
+anvyl               # then type /login and paste your OpenRouter API key
 ```
 
 For development: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`.
