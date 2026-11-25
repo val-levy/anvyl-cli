@@ -53,6 +53,7 @@ COMMANDS = {
     "/clear": "clear the screen",
     "/plugin": "list | load | unload <id>",
     "/skill": "list | load | unload <id>",
+    "/welcome": "replay the welcome guide",
     "/memory": "ideas you showed you know (forget <idea>)",
     "/graph": "show the loop steps",
     "/rail": "toggle the status rail",

@@ -31,8 +31,15 @@ ASPECTS = ("happy", "edge", "errors", "perf")
 _WORD = re.compile(r"[a-z0-9]{3,}")
 
 
+LABEL_WORDS = 8
+_UNSAFE = re.compile(r"[^A-Za-z0-9 \-_/,.()']")
+
+
 def _label(text: str) -> str:
-    return " ".join(_clean(str(text), LABEL_CAP).split())[:LABEL_CAP]
+    """Short plain label: strict character set and word count, so a hostile file cannot
+    smuggle an instruction sentence into memory that later reaches the coach prompt."""
+    words = _UNSAFE.sub(" ", _clean(str(text), LABEL_CAP)).split()
+    return " ".join(words[:LABEL_WORDS])[:LABEL_CAP]
 
 
 def _key(label: str) -> str:

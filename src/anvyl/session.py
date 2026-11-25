@@ -34,7 +34,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from . import guard, tui
+from . import guard, tui, welcome
 from . import harness as hs
 from . import models as modelcat
 from .auth import get_api_key
@@ -303,6 +303,8 @@ class Session:
             self.registry_cmd("plugin", self.plugins, args)
         elif cmd == "/skill":
             self.registry_cmd("skill", self.skills, args)
+        elif cmd == "/welcome":
+            welcome.show(self)
         elif cmd == "/memory":
             self.memory_cmd(args)
         elif cmd == "/score":
@@ -716,6 +718,9 @@ def run_session(
                 else:
                     s.say(f"anvyl  |  {s.root.name}  |  /help for commands", ACCENT)
                 s.setup_folder()
+                if not welcome.seen(data_dir):
+                    welcome.show(s)
+                    welcome.mark_seen(data_dir)
                 for ln in HOWTO:
                     s.say(ln, MUTED)
                 if last := s.memory.last_line():

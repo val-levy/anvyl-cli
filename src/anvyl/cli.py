@@ -33,7 +33,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from rich.console import Console
 from rich.panel import Panel
 
-from . import auth, tasks
+from . import auth, tasks, welcome
 from .coach import Coach
 from .driver import drive
 from .graph import LOOP_STEPS, build_graph
@@ -430,6 +430,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("memory", "print what anvyl remembers about this folder as JSON").add_argument(
         "action", choices=["export"]
     )
+    add("welcome", "replay the welcome guide (also: anvyl --welcome)")
     t = add("tutorial", "run the built-in tutorial tasks")
     t.add_argument(
         "--task",
@@ -472,6 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _route(argv: list[str]) -> list[str]:
     """No subcommand means `session`; legacy tutorial flags mean `tutorial`."""
+    if "--welcome" in argv:
+        return ["welcome", *[a for a in argv if a != "--welcome"]]
     if argv and (argv[0] in SUBCOMMANDS or argv[0] in ("-h", "--help")):
         return argv
     if argv and not argv[0].startswith("-"):
@@ -590,6 +593,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "harness":
         return run_harness(args, console)
+    if args.cmd == "welcome":
+        print("\n".join(welcome.lines()))
+        return 0
     if args.cmd == "memory":
         print(json.dumps(Memory(data_dir, Path.cwd()).export(), indent=2))
         return 0
