@@ -1,6 +1,6 @@
 # Tutor mode: design
 
-Status: draft for approval. Nothing here is built yet.
+Status: approved. Phase 1 (tutor conversation, persistent memory, welcome menu) is built; closeness check, file edits and metrics are later phases.
 
 ## Intent
 

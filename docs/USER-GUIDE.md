@@ -29,13 +29,16 @@ Your answers are remembered.
 The first thing you type is **a ticket**: one task you want to do, such as `add retry to fetch`. It is not a chat. Typing "hi" makes "hi" the ticket.
 
 1. **Ticket.** Describe the task in a sentence or two.
-2. **Triage.** Anvyl sets the loop for your mode and level.
-3. **Attempt gate (Learn mode).** Write your plan in your own words. It can be wrong. An empty or vague attempt is rejected, and the coach and any code stay locked until you pass. This gate is enforced in code, not by a prompt.
-4. **Coach.** The coach asks a question or gives a hint. Reply, or type `/hint` for another.
-5. **Implement.** You write the code in your editor. Anvyl is not editing your files.
-6. **`/done`.** Say you are finished. Anvyl looks at your diff.
-7. **Explain back.** Three short questions about your own change, graded by the model with a strict rubric. This is the ownership check. It only runs when file reading is allowed.
-8. **Scorecard.** Time with and without AI, percent of code you typed, ownership score, level history. Saved as JSON in `sessions/`. `/score` shows the last one.
+2. **Goal.** What do you want to get done, and what does done look like?
+3. **Approach (Learn mode).** How would you go about it? Any plan is fine, even a guess. "I don't know" is a fine answer: the coach teaches you a little and asks again. You are never locked out. When you give a real approach, a code check marks the gate passed.
+4. **First step.** Name the very first small step. The coach reacts to it.
+5. **Coach.** The coach asks a question or gives a hint. Reply, or type `/hint` for another.
+6. **Implement.** You write the code in your editor. Anvyl is not editing your files.
+7. **`/done`.** Say you are finished. Anvyl looks at your diff.
+8. **Explain back.** Three short questions about your own change, graded by the model with a strict rubric. This is the ownership check. It only runs when file reading is allowed.
+9. **Scorecard.** Time with and without AI, percent of code you typed, ownership score, level history, and a "learned" line. Saved as JSON in `sessions/`. `/score` shows the last one.
+
+Ideas you showed you can do are remembered, so the coach builds on them next time. They are recorded only when explain-back runs and passes, and only when file reading is allowed. `/memory` lists them and `/memory forget <idea>` removes one.
 
 If your ownership score drops below 0.5, Anvyl drops you back to L1.
 
@@ -80,6 +83,8 @@ Type `/` to open a filtered menu. Use ↑/↓ and Enter, or keep typing the name
 | `/clear` | Clear the screen. |
 | `/plugin [list\|load\|unload <id>]` | Manage plugins. No argument opens a menu. |
 | `/skill [list\|load\|unload <id>]` | Manage skills. No argument opens a menu. |
+| `/memory [forget <idea>]` | List the ideas Anvyl remembers you know, or forget one. |
+| `/welcome` | Replay the welcome guide (also `anvyl --welcome`). |
 | `/harness [install <folder>\|remove <id>]` | Manage sub-harnesses. |
 | `/hint` | Ask the coach (at a work prompt). |
 | `/done` | Finish the ticket (at a work prompt). |
@@ -170,6 +175,8 @@ Resolved as `--data-dir`, then `$ANVYL_HOME`, then `~/.anvyl`.
   threads/             markers for in-flight tickets
   skills/  plugins/    your skills and plugins
   harnesses/           installed sub-harnesses
+  memory/              learner.json (ideas you know) and one ticket log per folder
+  welcomed             marker so the welcome guide shows once
 ```
 
 Closing the terminal mid-ticket leaves a checkpoint. Threads older than 7 days are purged at startup. `anvyl reset` removes everything above.
@@ -190,7 +197,6 @@ Anvyl is built so that text from your repo or from the model cannot change what 
 | Symptom | Fix |
 | ------- | --- |
 | `anvyl: command not found` | `pipx ensurepath`, then reopen the terminal. Or run `.venv/bin/anvyl`. |
-| Every message gets "write a real plan" | The first input is a ticket and the next is your plan. Describe a task, then write a real attempt. |
 | No explain-back questions | Professional profile with file reading refused for this folder, or you are in ship mode. |
 | `/level 3` refused | Real projects cap at L2. |
 | Screen garbled after a crash | Run `reset` in the terminal. |
