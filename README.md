@@ -1,6 +1,17 @@
 <p align="center"><img src="docs/logo.svg" alt="Anvyl" width="340"></p>
 
-**A coding tutor for your terminal. You drive, the AI teaches.**
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/LangGraph-state%20machine-1C3C3C" alt="LangGraph">
+  <img src="https://img.shields.io/badge/SQLite-checkpoints-003B57?logo=sqlite&logoColor=white" alt="SQLite">
+  <img src="https://img.shields.io/badge/OpenRouter-Claude-6467F2" alt="OpenRouter">
+  <img src="https://img.shields.io/badge/UI-Rich%20%2B%20prompt__toolkit-E8A33D" alt="Rich and prompt_toolkit">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
+</p>
+
+<p align="center"><b>A coding tutor for your terminal. You drive, the AI teaches.</b></p>
+
+<p align="center"><sub>Python · LangGraph · SQLite · OpenRouter · Rich · prompt_toolkit</sub></p>
 
 Most coding agents optimize for autonomy: take the task, hand back the diff. Anvyl optimizes for you understanding your own code. It talks the problem through with you, teaches the idea you're missing, and only helps with code once you've shown you can do the thinking. After you write the change, it asks you to explain it, and remembers what you've shown you know so it never re-teaches it.
 
