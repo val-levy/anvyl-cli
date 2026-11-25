@@ -142,3 +142,28 @@ def test_labels_are_plain_and_short(tmp_path):
     )
     [i] = m.ideas()
     assert len(i["label"].split()) <= 8 and "<" not in i["label"] and ">" not in i["label"]
+
+
+def test_bad_aspects_and_labels_in_file_are_cleaned_or_dropped(tmp_path):
+    m = mem(tmp_path)
+    m.record("retry with backoff", ["happy"])
+    p = tmp_path / "data" / "memory" / "learner.json"
+    good = json.loads(p.read_text())[0]
+    p.write_text(json.dumps([{**good, "aspects": [1]}, {**good, "label": "retry <b>x</b> " * 50}]))
+    assert all(a in ("happy", "edge", "errors", "perf") for i in m.ideas() for a in i["aspects"])
+    assert all("<" not in i["label"] and len(i["label"]) <= 80 for i in m.ideas())
+    m.recap("retry")
+    m.record("another idea", [])
+
+
+def test_write_failure_is_swallowed(tmp_path, monkeypatch):
+    m = mem(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("anvyl.memory.tempfile.mkstemp", boom)
+    m.record("retry with backoff", [])
+    key = m.start_ticket("x")
+    m.finish_ticket(key, "done", [])
+    assert m.ideas() == []

@@ -598,7 +598,7 @@ class Session:
         marks = self.data_dir / "threads"
         marks.mkdir(parents=True, exist_ok=True)
         (marks / sid).touch()
-        key = self.memory.start_ticket(ticket)
+        key = self.memory.start_ticket(ticket) if self.can_read else ""
         outcome, labels = "unfinished", []
         try:
             h = self.harness
@@ -642,7 +642,8 @@ class Session:
         except Exception as exc:  # type name only: messages can echo ticket or file text
             self.say(f"error: the ticket failed ({type(exc).__name__}); nothing was scored", RED)
         finally:
-            self.memory.finish_ticket(key, outcome, labels)
+            if key:
+                self.memory.finish_ticket(key, outcome, labels)
             self.view = {}
             clear_snapshot(work)
             _forget_thread(self.saver, self.data_dir, sid)

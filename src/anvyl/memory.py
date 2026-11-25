@@ -1,8 +1,10 @@
 """Persistent memory: what the learner has shown they can do, and where each folder left off.
 
 Two small JSON files under <data_dir>/memory, written only by code. Entries are short cleaned
-labels and counts (never code or typed text), so nothing grows with session length and the
-coach is rebuilt from a small budgeted recap on every call.
+labels and counts (never code), so nothing grows with session length and the coach is rebuilt
+from a small budgeted recap on every call. The only typed text kept is a short ticket line, and
+only for folders where the learner allowed file reading. Write failures are ignored: memory is
+best effort and must never fail a ticket.
 """
 
 from __future__ import annotations
@@ -66,23 +68,30 @@ class Memory:
             return default
         return data if isinstance(data, type(default)) else default
 
-    def _save(self, path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".mem-")
+    def _save(self, path: Path, data: Any) -> bool:
+        tmp = ""
         try:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".mem-")
             os.chmod(tmp, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f)
             os.replace(tmp, path)
+            return True
+        except OSError:  # disk full, read-only dir: skip remembering, keep the session alive
+            if tmp:
+                Path(tmp).unlink(missing_ok=True)
+            return False
         except BaseException:
-            Path(tmp).unlink(missing_ok=True)
+            if tmp:
+                Path(tmp).unlink(missing_ok=True)
             raise
 
     # -- ideas ---------------------------------------------------------------
     def ideas(self) -> list[dict]:
         out = []
         for i in self._load(self._learner, []):
-            if (
+            if not (
                 isinstance(i, dict)
                 and isinstance(i.get("label"), str)
                 and isinstance(i.get("reps"), int)
@@ -90,7 +99,11 @@ class Memory:
                 and isinstance(i.get("last"), (int, float))
                 and isinstance(i.get("aspects"), list)
             ):
-                out.append(i)
+                continue
+            label = _label(i["label"])  # a hand-edited file is re-cleaned like new input
+            if label:
+                aspects = sorted({a for a in i["aspects"] if a in ASPECTS})
+                out.append({**i, "label": label, "aspects": aspects})
         return out
 
     def record(self, label: str, aspects: Iterable[str]) -> None:
@@ -118,8 +131,7 @@ class Memory:
         left = [i for i in ideas if _key(i["label"]) != _key(_label(label))]
         if len(left) == len(ideas):
             return False
-        self._save(self._learner, left)
-        return True
+        return self._save(self._learner, left)
 
     def recap(self, text: str) -> str:
         want = _words(text)

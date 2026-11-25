@@ -97,3 +97,9 @@ def test_reset_removes_memory(tmp_path):
 
 def test_hints_cover_tutor_kinds():
     assert {"tutor_goal", "attempt", "tutor_step", "teach"} <= set(HINTS)
+
+
+def test_no_file_consent_stores_no_ticket_line(tmp_path):
+    root, data = prep(tmp_path, consent=False)
+    go(root, data, one_ticket(root), client=ticket_client())
+    assert Memory(data, root).export()["tickets"] == []
