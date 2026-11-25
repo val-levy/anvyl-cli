@@ -1,191 +1,82 @@
-# anvyl — human-most-of-the-loop coding coach
+# Anvyl
 
-The human is the driver. The AI is the navigator.
+**A coding tutor for your terminal. You drive, the AI teaches.**
 
-Most coding agents optimize for autonomy: do the task, don't bother the
-human. This one optimizes for human thinking. AI never just does the task
-and hands it back. You do the thinking; AI helps you think better. And it
-makes the trade-off visible: how much more productive you are with AI
-versus without it, and how much understanding each level of AI control
-costs you.
+Most coding agents optimize for autonomy: take the task, hand back the diff. Anvyl optimizes for you understanding your own code. It talks the problem through with you, teaches the idea you're missing, and only helps with code once you've shown you can do the thinking. After you write the change, it asks you to explain it, and remembers what you've shown you know so it never re-teaches it.
 
-See the design in `docs/superpowers/specs/2026-11-23-real-repo-release-design.md`, the plan in `docs/superpowers/plans/2026-11-23-anvyl-phase1-local.md`, and the dogfood guide in `docs/DOGFOOD.md`.
+## Features
+
+- **Dynamic tutor.** The model decides every turn: ask, teach, hint, or declare you ready. "I don't know" is always a fine answer, and it never locks you out.
+- **Rules live in code, not prompts.** The attempt gate, help levels, caps and grading thresholds are computed deterministically. Model output can't open the gate or change your level.
+- **No-code coach.** At L1 the coach can only ask and hint. A scrubber plus a separate judge strip any code that slips through.
+- **Explain-back.** Three short questions about your own diff, graded with a strict rubric. That's your ownership score.
+- **Persistent memory.** Short idea labels (never code) of what you've shown you can do, per learner and per project. `/memory` lists them, `/memory forget <idea>` removes one.
+- **Private by default.** Secrets are redacted before anything is sent, file reading needs your consent per folder, and `anvyl preview` shows exactly what would be sent.
+- **Full-screen terminal UI** with a pinned input line, slash-command menu and live model picker.
 
 ## Install
 
 Requires Python 3.12+.
 
 ```bash
-# run it without installing system-wide
-pipx install .
-
-# or, for development
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
+pipx install .      # or: uv tool install .
+anvyl login         # paste your OpenRouter API key (stored in the OS keychain)
+cd your-project
+anvyl
 ```
 
-This installs the `anvyl` command. For real tickets in a project folder, see `docs/DOGFOOD.md`; the commands below run the built-in tutorial.
+For development: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"`.
 
-## Quickstart
+## A session
 
-```bash
-# First task: a tiny toy task, the exponential-backoff retry helper.
-# It exercises the full Learn loop but stays trivial to verify.
-anvyl tutorial --task toy-backoff --mode learn
+1. Type one task, e.g. `add retry to fetch`.
+2. Talk it through with the tutor. It asks, teaches and hints until you've stated a workable approach.
+3. Write the code in your editor, then type `/done`.
+4. Explain your change in three short answers.
+5. Get a scorecard: time, how much you typed yourself, ownership score.
 
-# Fast path, no attempt gate, no explain-back (unless high-stakes):
-anvyl tutorial --task toy-backoff --mode ship
+Prefer speed? `/mode ship` skips the teaching and questions. No project handy? `anvyl tutorial` runs a practice task offline.
 
-# Second example task, from the WiFi sensing project:
-anvyl tutorial --task wifi-csi-backoff --mode learn
+## Levels
 
-anvyl tutorial --list-tasks
-```
+| Level | What the AI may do |
+| ----- | ------------------ |
+| L0 | Nothing. Baseline for comparing with and without AI. |
+| L1 (default) | Questions and hints only. Never code. |
+| L2 | Drafts small bits; you edit and type. |
 
-When stdin is not a terminal (or with `--demo`), the run is scripted:
-the demo supplies the goal, the human attempt, the typed code, and the
-explain-back answers from the task definition, so the whole loop runs
-end to end with no one present. In a terminal it is interactive: you
-type the attempt, the code, and the answers yourself.
-
-## The loop (Learn mode)
-
-1. **Goal** — state it in your own words.
-2. **Attempt gate** — a hard gate in code, not a prompt. No edge to the
-   coach or to any code until a human attempt is in typed state.
-3. **Coach** — questions and hints on a rung ladder (0–3). At L1 the
-   coach has no solution-writing tool, and a deterministic stripper +
-   separate judge remove any code that leaks anyway.
-4. **Implement** — you type. AI suggests line-by-line only at L2+.
-5. **Explain back** — a short quiz (retrieval practice). This is the
-   ownership check; tests passing is not learning.
-6. **Scorecard** — time with vs without AI, % of code typed by you,
-   ownership score, level history. Saved to `sessions/` as JSON.
-
-**Ship mode** is the fast path for daily work: no attempt gate, no
-explain-back, except for high-stakes changes (`--high-stakes`), which
-always require explain-back.
-
-## Levels of human vs AI control
-
-| Level | Name | What AI may do |
-| ----- | ---- | -------------- |
-| L0 | Human only | Silent. Baseline for with/without comparison. |
-| L1 | Coach (default) | Questions and hints only. Never code. |
-| L2 | Drafting partner | Drafts small bits; you edit and type. |
-| L3 | Implementer | Implements; you review and must explain back. |
-| L4 | Autonomous | Checkpoints only, for boring low-learning tasks. |
-
-You have to consciously turn the level up. If your ownership score
-drops below 0.5, anvyl drops you back to L1 automatically.
+Real projects are capped at L2. If your ownership score drops below 0.5, Anvyl drops you back to L1.
 
 ## Documentation
 
-- [User guide](docs/USER-GUIDE.md): everything Anvyl can do, step by step.
-- [Sub-harnesses](docs/HARNESSES.md): create, install and publish your own presets.
-- [Dogfood guide](docs/DOGFOOD.md): manual checklist for real tickets.
+- [User guide](docs/USER-GUIDE.md): every command and setting.
+- [Sub-harnesses](docs/HARNESSES.md): data-only presets such as "TDD first" or "security review".
+- [Manual test checklist](docs/MANUAL-TEST.md): trying it on a real ticket.
 
-Run `anvyl` in a project folder for a real session, or `anvyl tutorial` for the practice tasks below. Type `/help` for slash commands.
+## How it's built
 
-## Live coach (Claude via OpenRouter)
-
-By default the coach is **offline/demo**: deterministic hints from the
-task's rung ladder, free and reproducible. Pass `--live` for the real
-model (Claude via OpenRouter):
-
-```bash
-export OPENROUTER_API_KEY="..."        # standard path
-anvyl tutorial --task toy-backoff --mode learn --live
-```
-
-No key is ever stored in the repo. Without a key, `--live`
-falls back to offline hints and says so in the scorecard (`live model:
-no`).
-
-## Plugins and skills
-
-Skills are `SKILL.md` files, loaded on demand only (`/skill load
-wifi-csi`). Plugins are bundles (manifest + skills + commands + tools)
-under `plugins/`, loaded with `/plugin load <id>`.
-
-The rule that matters: **plugins run inside the policy core**. A plugin
-cannot bypass the attempt gate, change your level, or write code at
-L0/L1 — whatever its manifest claims. Remote plugin fetching is not built yet; add a local folder with a `manifest.json` to install one.
-
-Bundled examples: skills `toy-backoff`, `wifi-csi`; plugins `wifi-csi`,
-`gh-review`.
-
-## Data
-
-All runtime data lives in one dir, resolved as `--data-dir` >
-`$ANVYL_HOME` > `~/.anvyl`:
+A [LangGraph](https://github.com/langchain-ai/langgraph) state machine with SQLite checkpoints, so a ticket survives a closed terminal. Human input arrives through `interrupt()`; a deterministic policy core owns every gate. Models are reached through OpenRouter, and the default is `anthropic/claude-sonnet-4.5`.
 
 ```
-~/.anvyl/
-  sessions/           session JSON logs (one per run)
-  checkpoints.sqlite  LangGraph checkpointer (resumable sessions)
-  skills/             your skills (bundled examples seeded on first run)
-  plugins/            your plugins (bundled examples seeded on first run)
-```
-
-Resume a blocked session with `anvyl tutorial --session <id>` (re-answers the
-pending interrupt).
-
-## Layout
-
-```
-pyproject.toml          packaging, entry point, ruff/mypy/pytest config
 src/anvyl/
-  __init__.py  __main__.py  cli.py       Rich CLI + slash commands
-  state.py     typed LangGraph state
-  graph.py     the directed graph + interrupt/resume driver helper
-  policy.py    non-LLM policy core (gate, levels, plugin gating)
-  judge.py     separate judge (did code leak into a reply?)
-  coach.py     live Claude via OpenRouter / offline hint ladder
-  tasks.py     task registry (toy-backoff default, wifi-csi-backoff)
-  registry.py  plugin + skill registries
-  storage.py   data-dir resolution, session JSON, checkpointer path
-  data/        bundled example skills + plugin manifests
-tests/         pytest: policy, judge, tasks, graph, coach, registry, storage
+  graph.py     the session graph: tutor, coach, implement, explain-back, scorecard
+  tutor.py     tutor moves and idea extraction
+  policy.py    gate, levels, code stripping (no LLM)
+  grader.py    strict-JSON grading, fails closed
+  memory.py    persistent idea memory
+  coach.py     offline hint ladder; real_coach.py: the live model coach
+  fullscreen.py, tui.py, theme.py   terminal UI
+tests/          pytest
 ```
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
 pytest
 ruff check src tests
-ruff format --check src tests
 mypy src/anvyl
 ```
 
-## Verification (v1 demo, pre-rename)
+## License
 
-- `pytest`: 42 passed, covering the attempt gate, the stripper, the
-  judge, plugin gating, level auto-drop, task verification, the full
-  Learn loop, the Ship fast path, the gate proof (no attempt -> coach
-  never runs, no code exists), Ship high-stakes explain-back, and the
-  live-coach fallback.
-- `ruff check`, `ruff format --check`, `mypy src/anvyl`: all clean.
-- `anvyl tutorial --task toy-backoff --mode learn` (demo): ownership 100%,
-  verify passed (6/6 checks), session JSON saved.
-- `anvyl tutorial --task toy-backoff --mode ship`: AI-drafted, verify passed,
-  explain-back correctly skipped.
-- `anvyl tutorial --task wifi-csi-backoff --mode learn`: verify passed.
-- Interactive run via piped stdin: ownership 100%, verify passed.
-- Empty attempt in interactive mode: gate blocks, session saved for
-  resume with `--session`.
-- Live coach (`--live`, Claude via OpenRouter through the author's
-  helper): real reply received, `live_model: yes`, ownership 100%.
-- Clean-venv `pip install` of the project directory: entry point works,
-  demo run passes, bundled skills/plugins seed into a fresh data dir.
-
-## What is real vs stubbed in V1
-
-Real: the LangGraph graph, the hard attempt gate, the stripper + judge,
-the rung-ladder coach, the scorecard, SQLite checkpoints, session JSON
-logs, the plugin/skill registries with policy gating, the Rich CLI.
-
-Stubbed / future: remote plugin fetching (`/plugin install` for new
-plugins), an LLM judge (the V1 judge is deterministic regex), Postgres
-checkpointer (SQLite for now), a live Textual TUI (Rich first).
+MIT

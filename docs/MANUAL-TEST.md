@@ -1,6 +1,6 @@
-# Dogfood guide (Phase 1, local only)
+# Manual test checklist
 
-Anvyl is installed locally and used by Val on real tickets, starting with this project. Nothing leaves the machine except model calls you trigger yourself.
+A hands-on checklist for trying Anvyl on a real ticket. Nothing leaves the machine except model calls you trigger yourself.
 
 ## Install
 
@@ -32,7 +32,7 @@ CI checks grading against a fake client. Before relying on it, check the real mo
 
 For each fixture, call `anvyl.grader.grade_answers` with a real `anvyl.llm` client (key from `anvyl login` or `OPENROUTER_API_KEY`), passing the fixture diff and the question/answer pairs for each answer set. Check that good scores about 1.0 and vague and wrong score about 0. Note any fixture where the model is too harsh or too lenient.
 
-## Exit criteria (Val decides after using it)
+## What good looks like
 
 - The session loop feels good.
 - The gate and explain-back are fair.

@@ -1,11 +1,11 @@
 """Rich CLI for anvyl.
 
-Opencode style, per Val's direction: warm dark background (the terminal's
+Opencode style: warm dark background (the terminal's
 own), JetBrains Mono, one blue accent, thin borders, no gradients, no
 emoji. ASCII markers only: [ok], [!], [>], [locked].
 
 Top bar shows the task name and the timer only. It deliberately does NOT
-show a "LEARN - L1 - COACH" badge -- Val rejected that as AI-looking.
+show a "LEARN - L1 - COACH" badge, which looks AI-generated.
 Mode, level, and the 1-6 loop live in the side rail only. The rail
 auto-hides on narrow terminals (under 110 columns); a one-line ministrip
 carries step / level / gate / ownership / work-split while it is hidden.
